@@ -68,10 +68,8 @@ async def download_stream_with_ffmpeg(url: str, dest: Path, headers: dict[str, s
             "-y",
             "-i",
             url,
-            "-map",
-            "0:v:0",
-            "-map",
-            "0:a:0?",
+            # Let ffmpeg choose the highest-resolution video stream from master
+            # playlists instead of forcing the first (usually lowest) variant.
             "-c",
             "copy",
             "-movflags",

@@ -40,6 +40,25 @@ def test_pick_video_prefers_hls_when_quality_matches() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stream_download_lets_ffmpeg_pick_highest_quality(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: list[str] = []
+
+    async def fake_run_ffmpeg(args: list[str]) -> None:
+        captured.extend(args)
+
+    monkeypatch.setattr(ffmpeg_tools, "run_ffmpeg", fake_run_ffmpeg)
+
+    await ffmpeg_tools.download_stream_with_ffmpeg(
+        "https://cdn.example/master.m3u8",
+        tmp_path / "episode.mp4",
+    )
+
+    assert "-map" not in captured
+    assert captured[captured.index("-i") + 1] == "https://cdn.example/master.m3u8"
+    assert captured[captured.index("-c") + 1] == "copy"
+
+
+@pytest.mark.asyncio
 async def test_ffmpeg_process_is_terminated_when_download_is_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeProcess:
         returncode: int | None = None
