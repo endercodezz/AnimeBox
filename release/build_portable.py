@@ -23,7 +23,11 @@ def run(*args: str, cwd: Path = ROOT) -> None:
     subprocess.run(args, cwd=cwd, check=True)
 
 
-def target_name() -> str:
+def target_name(explicit: str | None = None) -> str:
+    if explicit:
+        if Path(explicit).name != explicit or explicit in {".", ".."} or not explicit.startswith("AnimeBox-"):
+            raise ValueError("target name must be an AnimeBox-* directory name without path separators")
+        return explicit
     system = platform.system()
     machine = platform.machine().lower()
     arch = "arm64" if machine in {"arm64", "aarch64"} else "x64"
@@ -46,8 +50,8 @@ def find_ffmpeg(explicit: str | None) -> Path:
     raise RuntimeError("ffmpeg not found; pass --ffmpeg PATH")
 
 
-def assemble(ffmpeg: Path) -> tuple[Path, str]:
-    name = target_name()
+def assemble(ffmpeg: Path, explicit_name: str | None = None) -> tuple[Path, str]:
+    name = target_name(explicit_name)
     source = DIST / "AnimeBox"
     target = ARTIFACTS / name
     if target.exists():
@@ -86,14 +90,16 @@ def archive(target: Path, name: str) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build native AnimeBox portable archive")
     parser.add_argument("--ffmpeg", help="Path to native ffmpeg executable")
+    parser.add_argument("--target-name", help="Override artifact name, for example AnimeBox-SteamDeck-x64")
     parser.add_argument("--skip-frontend", action="store_true")
     parser.add_argument("--skip-tests", action="store_true")
     args = parser.parse_args()
 
     ffmpeg = find_ffmpeg(args.ffmpeg)
     if not args.skip_frontend:
-        run("npm", "ci", cwd=ROOT / "frontend")
-        run("npm", "run", "build", cwd=ROOT / "frontend")
+        npm = "npm.cmd" if os.name == "nt" else "npm"
+        run(npm, "ci", cwd=ROOT / "frontend")
+        run(npm, "run", "build", cwd=ROOT / "frontend")
     if not args.skip_tests:
         run(sys.executable, "-m", "pytest", "-q")
     WORK.mkdir(parents=True, exist_ok=True)
@@ -111,7 +117,7 @@ def main() -> int:
         str(DIST),
         str(RELEASE / "animebox.spec"),
     )
-    target, name = assemble(ffmpeg)
+    target, name = assemble(ffmpeg, args.target_name)
     output = archive(target, name)
     print(f"Portable artifact: {output}")
     return 0

@@ -1,11 +1,13 @@
 # AnimeBox portable builds
 
-Builds are native per operating system. Run this on Windows, Linux, or macOS using Python 3.12 and Node 20:
+Builds are native per operating system. Run this on Windows, Linux, or macOS using Python 3.12 and Node 20+:
 
 ```bash
 python -m pip install -r backend/requirements.txt -r release/requirements-build.txt
 python release/build_portable.py --ffmpeg /path/to/native/ffmpeg
 ```
+
+Use `--target-name AnimeBox-SteamDeck-x64` for Steam Deck release naming. CI builds this target on Ubuntu 22.04 so its glibc baseline remains compatible with SteamOS while bundling all Python dependencies and ffmpeg.
 
 Generated files:
 

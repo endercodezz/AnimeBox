@@ -33,6 +33,7 @@ AnimeBox остаётся web-приложением: launcher поднимае�
 |---|---|
 | `AnimeBox-Windows-x64.zip` | распаковать и открыть `AnimeBox.exe` |
 | `AnimeBox-Linux-x64.tar.gz` | распаковать, выполнить `chmod +x AnimeBox && ./AnimeBox` |
+| `AnimeBox-SteamDeck-x64.tar.gz` | Steam Deck / SteamOS; распаковать в Desktop Mode, выполнить `chmod +x AnimeBox && ./AnimeBox` |
 | `AnimeBox-macOS-x64.zip` | Intel Mac; распаковать и открыть launcher |
 | `AnimeBox-macOS-arm64.zip` | Apple Silicon; распаковать и открыть launcher |
 
