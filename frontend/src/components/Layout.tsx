@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
+import { api } from '../api/client'
 
 const links = [
   { to: '/search', label: 'Поиск', short: 'Поиск' },
@@ -8,6 +10,24 @@ const links = [
 ]
 
 export function Layout() {
+  const [stopping, setStopping] = useState(false)
+  const [canStop, setCanStop] = useState(false)
+
+  useEffect(() => {
+    api.session().then((session) => setCanStop(session.shutdown_enabled)).catch(() => {})
+  }, [])
+
+  async function stopAnimeBox() {
+    if (!window.confirm('Остановить AnimeBox? Активные загрузки продолжатся при следующем запуске.')) return
+    setStopping(true)
+    try {
+      await api.shutdown()
+    } catch (err) {
+      setStopping(false)
+      window.alert(err instanceof Error ? err.message : 'Не удалось остановить AnimeBox')
+    }
+  }
+
   return (
     <div className="grain relative min-h-screen">
       <header className="sticky top-0 z-50 border-b border-white/6 bg-ink/82 backdrop-blur-2xl">
@@ -48,6 +68,16 @@ export function Layout() {
             <span className="hidden rounded-full border border-ok/20 bg-ok/8 px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-[0.14em] text-ok sm:inline">
               Local
             </span>
+            {canStop && (
+              <button
+                type="button"
+                onClick={() => void stopAnimeBox()}
+                disabled={stopping}
+                className="rounded-lg border border-danger/20 bg-danger/8 px-3 py-2 text-xs font-bold text-danger transition hover:bg-danger/15 disabled:opacity-50"
+              >
+                {stopping ? 'Остановка…' : 'Выключить'}
+              </button>
+            )}
           </div>
         </div>
 

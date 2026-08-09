@@ -25,13 +25,19 @@ def test_main_prepares_root_before_importing_app(monkeypatch, tmp_path: Path) ->
     sys.modules.pop("backend.main", None)
     captured: dict[str, object] = {}
 
-    def fake_run(app, **_kwargs) -> None:
-        captured["app"] = app
-        captured["cwd"] = Path.cwd()
-        captured["data_exists"] = (root / "data").is_dir()
-        captured["library_exists"] = (root / "library").is_dir()
+    class FakeServer:
+        should_exit = False
 
-    monkeypatch.setattr(portable_main.uvicorn, "run", fake_run)
+        def __init__(self, config) -> None:
+            captured["app"] = config.app
+            captured["cwd"] = Path.cwd()
+            captured["data_exists"] = (root / "data").is_dir()
+            captured["library_exists"] = (root / "library").is_dir()
+
+        async def serve(self) -> None:
+            return None
+
+    monkeypatch.setattr(portable_main.uvicorn, "Server", FakeServer)
     try:
         assert portable_main.main() == 0
     finally:

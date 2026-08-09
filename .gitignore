@@ -31,8 +31,10 @@ frontend/*.local
 *.db-wal
 *.part
 
-# Local upstream reference checkouts
-.references/
+# Local upstream reference checkouts are cloned by install/release scripts.
+# AnimeBox compatibility changes belong in tracked patches/, never as hidden edits here.
+/.references/*
+!/.references/.gitkeep
 
 # Portable output — keep release source/spec/docs
 /release/work/

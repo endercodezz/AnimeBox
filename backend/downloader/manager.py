@@ -37,6 +37,8 @@ class DownloadManager:
                 await self._worker
             except asyncio.CancelledError:
                 pass
+            finally:
+                self._worker = None
 
     async def _requeue_pending(self) -> None:
         async with SessionLocal() as db:

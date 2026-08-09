@@ -7,7 +7,7 @@ python -m pip install -r backend/requirements.txt -r release/requirements-build.
 python release/build_portable.py --ffmpeg /path/to/native/ffmpeg
 ```
 
-Use `--target-name AnimeBox-SteamDeck-x64` for Steam Deck release naming. CI builds this target on Ubuntu 22.04 so its glibc baseline remains compatible with SteamOS while bundling all Python dependencies and ffmpeg.
+`AnimeBox-Linux-x64` also targets Steam Deck/SteamOS. CI produces one tested Linux x86_64 archive instead of duplicating identical application binaries under separate names.
 
 Generated files:
 

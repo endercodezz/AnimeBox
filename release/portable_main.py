@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import socket
@@ -66,7 +67,9 @@ def main() -> int:
     ensure_runtime_files(root)
     os.chdir(root)
 
-    from backend.main import app
+    from backend.main import app, enable_shutdown, wait_for_shutdown
+
+    enable_shutdown()
 
     log_path = root / "data" / "animebox.log"
     logging.basicConfig(
@@ -90,7 +93,19 @@ def main() -> int:
     url = f"http://127.0.0.1:{port}"
     logging.info("Starting AnimeBox at %s", url)
     threading.Thread(target=wait_and_open, args=(url,), daemon=True).start()
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+
+    async def serve() -> None:
+        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="info"))
+        server_task = asyncio.create_task(server.serve())
+        shutdown_task = asyncio.create_task(wait_for_shutdown())
+        done, pending = await asyncio.wait({server_task, shutdown_task}, return_when=asyncio.FIRST_COMPLETED)
+        if shutdown_task in done:
+            server.should_exit = True
+        await server_task
+        for task in pending:
+            task.cancel()
+
+    asyncio.run(serve())
     return 0
 
 

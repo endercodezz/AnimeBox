@@ -5,7 +5,7 @@ import mimetypes
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +43,22 @@ router = APIRouter(prefix="/api")
 @router.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@router.get("/session")
+async def session():
+    from backend.main import SHUTDOWN_TOKEN, shutdown_enabled
+
+    return {"shutdown_token": SHUTDOWN_TOKEN, "shutdown_enabled": shutdown_enabled()}
+
+
+@router.post("/shutdown", response_model=ApiMessage)
+async def shutdown(x_animebox_token: str = Header(...)):
+    from backend.main import request_shutdown
+
+    if not request_shutdown(x_animebox_token):
+        raise HTTPException(403, "Invalid shutdown token")
+    return ApiMessage(message="AnimeBox is shutting down")
 
 
 @router.get("/sources", response_model=list[SourceInfo])

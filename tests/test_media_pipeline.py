@@ -7,6 +7,7 @@ import pytest
 
 from backend.downloader.manager import DownloadManager
 from backend.player.proxy import _rewrite_m3u8
+from backend.services import ffmpeg_tools
 from backend.config import Settings
 from backend.providers.registry import DEFAULT_SOURCES, _pick_video, load_extractor
 
@@ -36,6 +37,39 @@ def test_pick_video_prefers_hls_when_quality_matches() -> None:
     picked = _pick_video(videos, 1080)
 
     assert picked.type == "m3u8"
+
+
+@pytest.mark.asyncio
+async def test_ffmpeg_process_is_terminated_when_download_is_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeProcess:
+        returncode: int | None = None
+        terminated = False
+
+        async def communicate(self):
+            raise __import__("asyncio").CancelledError
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.returncode = -15
+
+        async def wait(self) -> int:
+            return self.returncode or 0
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+    process = FakeProcess()
+
+    async def fake_create_subprocess_exec(*_args, **_kwargs):
+        return process
+
+    monkeypatch.setattr(ffmpeg_tools, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(ffmpeg_tools.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    with pytest.raises(__import__("asyncio").CancelledError):
+        await ffmpeg_tools.run_ffmpeg(["-version"])
+
+    assert process.terminated is True
 
 
 def test_rewrite_m3u8_rewrites_segments_and_uri_attributes() -> None:

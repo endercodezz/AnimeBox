@@ -37,7 +37,7 @@ Reference repositories live in local `.references/` checkouts and are excluded f
 - **Website:** https://ffmpeg.org/
 - **Project:** FFmpeg contributors
 - **License:** LGPL-2.1-or-later or GPL-2.0-or-later depending on build configuration
-- **Used for:** HLS/DASH downloading, remuxing, and optional Steam Deck transcoding. Windows archives bundle builds from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/), Linux and Steam Deck archives bundle GPL builds from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), and macOS archives bundle Homebrew builds.
+- **Used for:** HLS/DASH downloading, remuxing, and optional Steam Deck transcoding. Windows archives bundle builds from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/), the Linux/Steam Deck archive bundles a GPL build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), and macOS archives bundle Homebrew builds.
 
 ## PyInstaller
 

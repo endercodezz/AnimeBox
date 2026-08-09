@@ -22,12 +22,6 @@ jobs:
             name: Linux-x64
             ffmpeg_url: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
             target_name: AnimeBox-Linux-x64
-          # SteamOS is Arch-based, but its glibc is older than rolling Arch.
-          # Ubuntu 22.04 produces a binary compatible with Steam Deck's newer glibc.
-          - os: ubuntu-22.04
-            name: SteamDeck-x64
-            ffmpeg_url: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
-            target_name: AnimeBox-SteamDeck-x64
           - os: macos-15-intel
             name: macOS-x64
             ffmpeg_url: system
@@ -136,6 +130,23 @@ jobs:
                       raise SystemExit(f'portable search check returned HTTP {response.status}')
               if (launch_cwd / 'data').exists() or (launch_cwd / 'library').exists():
                   raise SystemExit('portable runtime files leaked into launch working directory')
+              with urllib.request.urlopen('http://127.0.0.1:8787/api/session', timeout=5) as response:
+                  token = __import__('json').load(response)['shutdown_token']
+              request = urllib.request.Request(
+                  'http://127.0.0.1:8787/api/shutdown',
+                  method='POST',
+                  headers={'X-AnimeBox-Token': token},
+              )
+              with urllib.request.urlopen(request, timeout=5) as response:
+                  if response.status != 200:
+                      raise SystemExit(f'portable shutdown returned HTTP {response.status}')
+              proc.wait(timeout=15)
+              if proc.returncode != 0:
+                  output = proc.stdout.read() if proc.stdout else ''
+                  raise SystemExit(f'portable shutdown exited with {proc.returncode}:\n{output}')
+              with __import__('socket').socket() as sock:
+                  if sock.connect_ex(('127.0.0.1', 8787)) == 0:
+                      raise SystemExit('portable shutdown did not release port 8787')
           finally:
               if proc.poll() is None:
                   proc.terminate()

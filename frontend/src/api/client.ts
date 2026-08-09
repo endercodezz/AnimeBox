@@ -35,6 +35,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<{ status: string }>('/api/health'),
+  session: () => request<{ shutdown_token: string; shutdown_enabled: boolean }>('/api/session'),
+  shutdown: async () => {
+    const session = await request<{ shutdown_token: string; shutdown_enabled: boolean }>('/api/session')
+    return request<{ message: string }>('/api/shutdown', {
+      method: 'POST',
+      headers: { 'X-AnimeBox-Token': session.shutdown_token },
+    })
+  },
   sources: () => request<SourceInfo[]>('/api/sources'),
   search: (q: string, source?: string) => {
     const params = new URLSearchParams({ q })

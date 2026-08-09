@@ -14,6 +14,7 @@ export function AnimePage() {
   const [localEps, setLocalEps] = useState<LibraryEpisode[]>([])
   const [voiceMap, setVoiceMap] = useState<Record<number, VoiceoverOption[]>>({})
   const [selectedVoice, setSelectedVoice] = useState<Record<number, string>>({})
+  const [seasonVoice, setSeasonVoice] = useState('')
   const [loadingVoices, setLoadingVoices] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -58,7 +59,7 @@ export function AnimePage() {
 
   const episodes = useMemo(() => detail?.episodes || [], [detail])
 
-  async function loadVoiceovers(ep: number) {
+  async function loadVoiceovers(ep: number): Promise<VoiceoverOption[]> {
     if (voiceMap[ep]) return voiceMap[ep]
     setLoadingVoices(ep)
     try {
@@ -80,8 +81,8 @@ export function AnimePage() {
     setBusy(true)
     setMessage(null)
     try {
-      await loadVoiceovers(ep)
-      const voice = selectedVoice[ep]
+      const list = await loadVoiceovers(ep)
+      const voice = selectedVoice[ep] || list[0]?.title
       await api.createDownloads({
         anime_id: id,
         episode: ep,
@@ -103,6 +104,7 @@ export function AnimePage() {
       await api.createDownloads({
         anime_id: id,
         episodes: detail.episodes.map((e) => e.ordinal),
+        voiceover: seasonVoice || null,
       })
       setMessage('Сезон добавлен в очередь загрузок')
       navigate('/downloads')
@@ -113,12 +115,21 @@ export function AnimePage() {
     }
   }
 
-  function playEpisode(ep: number, localId?: number) {
-    const voice = selectedVoice[ep]
+  function playEpisode(ep: number, localId?: number, voiceover?: string) {
+    const voice = voiceover || selectedVoice[ep]
     const qs = new URLSearchParams({ episode: String(ep) })
     if (voice) qs.set('voiceover', voice)
     if (localId) qs.set('local', String(localId))
     navigate(`/player/${encodeURIComponent(id)}?${qs}`)
+  }
+
+  async function prepareAndPlay(ep: number, localId?: number) {
+    if (localId) {
+      playEpisode(ep, localId)
+      return
+    }
+    const list = await loadVoiceovers(ep)
+    playEpisode(ep, undefined, selectedVoice[ep] || list[0]?.title)
   }
 
   if (error && !detail) {
@@ -140,7 +151,21 @@ export function AnimePage() {
           <div className="flex flex-col justify-center space-y-5">
             <div><p className="eyebrow">{[detail.source, detail.year].filter(Boolean).join(' · ')}</p><h1 className="mt-2 max-w-4xl font-display text-4xl font-extrabold leading-tight tracking-[-0.045em] sm:text-5xl lg:text-6xl">{detail.title}</h1></div>
             {detail.description && <p className="max-w-3xl text-sm leading-7 text-fog sm:text-base">{detail.description}</p>}
-            {!localMode && <div className="flex flex-wrap gap-3"><button type="button" disabled={busy} onClick={downloadSeason} className="btn-primary">↓ Скачать сезон</button><Link to="/downloads" className="btn-secondary">Очередь загрузок</Link></div>}
+            {!localMode && (
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="min-w-56 space-y-1">
+                  <span className="block text-xs font-bold uppercase tracking-wider text-fog">Озвучка сезона</span>
+                  <input
+                    value={seasonVoice}
+                    onChange={(e) => setSeasonVoice(e.target.value)}
+                    className="w-full rounded-xl border border-white/8 bg-ink-3 px-3 py-2.5 text-sm text-paper outline-none focus:border-amber/50"
+                    placeholder="Автовыбор или название"
+                  />
+                </label>
+                <button type="button" disabled={busy} onClick={downloadSeason} className="btn-primary">↓ Скачать сезон</button>
+                <Link to="/downloads" className="btn-secondary">Очередь загрузок</Link>
+              </div>
+            )}
             {localMode && <span className="w-fit rounded-full bg-ok/12 px-3 py-1 text-xs font-bold text-ok">Доступно офлайн</span>}
             {message && <p className="text-sm font-bold text-ok">✓ {message}</p>}
             {error && <p className="text-sm text-danger">{error}</p>}
@@ -162,11 +187,17 @@ export function AnimePage() {
                     <p className="font-bold">{ep.title}</p>
                     {local && <p className="mt-1 text-xs font-semibold text-ok">● Офлайн · {local.voiceover || 'озвучка неизвестна'}</p>}
                   </div>
-                  <button type="button" onClick={() => playEpisode(ep.ordinal, local?.id)} className="btn-primary px-4 py-2 text-sm">▶ Смотреть</button>
+                  <button
+                    type="button"
+                    onClick={() => void prepareAndPlay(ep.ordinal, local?.id)}
+                    className="btn-primary px-4 py-2 text-sm"
+                  >
+                    ▶ Смотреть
+                  </button>
                   {!localMode && (
                     <>
-                      <button type="button" onClick={() => loadVoiceovers(ep.ordinal)} className="btn-secondary px-3 py-2 text-sm">{loadingVoices === ep.ordinal ? 'Загрузка…' : 'Озвучки'}</button>
-                      <button type="button" disabled={busy} onClick={() => downloadEpisode(ep.ordinal)} className="btn-secondary border-amber/20 px-3 py-2 text-sm text-violet-soft">↓ Скачать</button>
+                      <button type="button" onClick={() => void loadVoiceovers(ep.ordinal)} className="btn-secondary px-3 py-2 text-sm">{loadingVoices === ep.ordinal ? 'Загрузка…' : voices.length ? 'Обновить озвучки' : 'Выбрать озвучку'}</button>
+                      <button type="button" disabled={busy} onClick={() => void downloadEpisode(ep.ordinal)} className="btn-secondary border-amber/20 px-3 py-2 text-sm text-violet-soft">↓ Скачать выбранную</button>
                     </>
                   )}
                 </div>

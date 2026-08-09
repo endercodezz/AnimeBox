@@ -35,7 +35,17 @@ async def run_ffmpeg(args: list[str]) -> None:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    _out, err = await proc.communicate()
+    try:
+        _out, err = await proc.communicate()
+    except asyncio.CancelledError:
+        if proc.returncode is None:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+        raise
     if proc.returncode != 0:
         raise RuntimeError(err.decode("utf-8", errors="ignore")[-2000:] or "ffmpeg failed")
 

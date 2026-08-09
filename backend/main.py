@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,6 +25,32 @@ logging.basicConfig(
 logger = logging.getLogger("animebox")
 
 FRONTEND_DIST = PACKAGE_DIR / "frontend" / "dist"
+SHUTDOWN_TOKEN = secrets.token_urlsafe(32)
+_shutdown_event: asyncio.Event | None = None
+_shutdown_enabled = False
+
+
+def enable_shutdown() -> None:
+    global _shutdown_enabled
+    _shutdown_enabled = True
+
+
+def shutdown_enabled() -> bool:
+    return _shutdown_enabled
+
+
+def request_shutdown(token: str) -> bool:
+    if not _shutdown_enabled or not secrets.compare_digest(token, SHUTDOWN_TOKEN):
+        return False
+    if _shutdown_event is not None:
+        _shutdown_event.set()
+    return True
+
+
+async def wait_for_shutdown() -> None:
+    while _shutdown_event is None:
+        await asyncio.sleep(0)
+    await _shutdown_event.wait()
 
 
 def _frontend_index() -> Path:
@@ -35,6 +63,8 @@ def _frontend_ready() -> bool:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    global _shutdown_event
+    _shutdown_event = asyncio.Event()
     await init_db()
     await download_manager.start()
     if _frontend_ready():
@@ -45,8 +75,11 @@ async def lifespan(_app: FastAPI):
             "Build UI (scripts/run.ps1 / npm run build) or open Vite on :5173.",
             settings.library_path,
         )
-    yield
-    await download_manager.stop()
+    try:
+        yield
+    finally:
+        await download_manager.stop()
+        _shutdown_event = None
 
 
 app = FastAPI(title="AnimeBox", version="0.1.0", lifespan=lifespan)

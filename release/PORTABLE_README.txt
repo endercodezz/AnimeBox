@@ -2,8 +2,7 @@ AnimeBox Portable
 =================
 
 Windows:   double-click AnimeBox.exe
-Linux:     run ./AnimeBox
-Steam Deck: in Desktop Mode, run ./AnimeBox from extracted AnimeBox-SteamDeck-x64 folder
+Linux / Steam Deck: run ./AnimeBox from extracted AnimeBox-Linux-x64 folder
 macOS:     run AnimeBox (first launch may require Control-click > Open)
 
 AnimeBox starts a private localhost server and opens your system browser.
