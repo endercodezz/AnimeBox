@@ -1,0 +1,26 @@
+diff --git a/anicli_api/player/__init__.py b/anicli_api/player/__init__.py
+index 8bb2a03..3fa3984 100644
+--- a/anicli_api/player/__init__.py
++++ b/anicli_api/player/__init__.py
+@@ -3,9 +3,18 @@ from anicli_api.player.aksor import Aksor
+ from anicli_api.player.csst import CsstOnline
+ from anicli_api.player.kodik import Kodik
+ from anicli_api.player.sibnet import SibNet
+-from anicli_api.player.sovetromantica import SovietRomanticaPlayer
+-from anicli_api.player.sovetromantica_embed import SovietRomanticaEmbed
++# SovietRomantica modules were removed upstream; keep player loading resilient.
++try:
++    from anicli_api.player.sovetromantica import SovietRomanticaPlayer
++    from anicli_api.player.sovetromantica_embed import SovietRomanticaEmbed
++except ImportError:  # pragma: no cover - depends on upstream checkout contents
++    SovietRomanticaPlayer = None
++    SovietRomanticaEmbed = None
+ from anicli_api.player.cdnvideohub import CdnVideoHub, video_playlist_from_vk_id, a_video_playlist_from_vk_id # type: ignore
+ 
+-ALL_DECODERS = (Kodik, Aniboom, Aksor, SibNet, CsstOnline, SovietRomanticaPlayer, SovietRomanticaEmbed, CdnVideoHub)
++ALL_DECODERS = tuple(
++    decoder
++    for decoder in (Kodik, Aniboom, Aksor, SibNet, CsstOnline, SovietRomanticaPlayer, SovietRomanticaEmbed, CdnVideoHub)
++    if decoder is not None
++)
+ 

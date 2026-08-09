@@ -7,7 +7,17 @@ import pytest
 
 from backend.downloader.manager import DownloadManager
 from backend.player.proxy import _rewrite_m3u8
-from backend.providers.registry import _pick_video
+from backend.config import Settings
+from backend.providers.registry import DEFAULT_SOURCES, _pick_video, load_extractor
+
+
+def test_all_default_search_sources_import() -> None:
+    settings = Settings(_env_file=None)
+
+    for source in DEFAULT_SOURCES:
+        extractor, module = load_extractor(source, settings)
+        assert extractor is not None
+        assert module.__name__ == f"anicli_api.source.{source}"
 
 
 @dataclass

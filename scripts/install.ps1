@@ -42,6 +42,8 @@ if (-not (Test-Path "$Anicli\pyproject.toml")) {
 } else {
   Write-Host "==> anicli-api checkout: OK"
 }
+& python "$Root\scripts\patch_anicli.py"
+if ($LASTEXITCODE -ne 0) { throw "Failed to apply AnimeBox compatibility patch to anicli-api." }
 
 $python = Join-Path $Root ".venv\Scripts\python.exe"
 $venvValid = (Test-Path $python)

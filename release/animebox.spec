@@ -6,8 +6,8 @@ ROOT = Path(SPECPATH).resolve().parent
 anicli_datas, anicli_binaries, anicli_hidden = collect_all("anicli_api")
 hiddenimports = sorted(set(
     anicli_hidden
-    + collect_submodules("anicli_api.source")
-    + collect_submodules("anicli_api.player")
+    + collect_submodules("anicli_api.source", on_error="raise")
+    + collect_submodules("anicli_api.player", on_error="raise")
     + ["aiosqlite", "sqlalchemy.dialects.sqlite.aiosqlite"]
 ))
 

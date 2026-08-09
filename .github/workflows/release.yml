@@ -51,7 +51,9 @@ jobs:
 
       - name: Checkout anicli-api
         shell: bash
-        run: git clone --depth 1 https://github.com/vypivshiy/anicli-api .references/anicli-api
+        run: |
+          git clone --depth 1 https://github.com/vypivshiy/anicli-api .references/anicli-api
+          python scripts/patch_anicli.py
 
       - name: Install Python dependencies
         run: python -m pip install -r backend/requirements.txt -r release/requirements-build.txt
@@ -126,6 +128,12 @@ jobs:
                   raise SystemExit(f'portable app failed health check:\n{output}')
               if not (folder / 'data' / 'animebox.db').is_file():
                   raise SystemExit('portable database was not created inside package data directory')
+              with urllib.request.urlopen('http://127.0.0.1:8787/api/sources', timeout=10) as response:
+                  if response.status != 200:
+                      raise SystemExit(f'portable sources check returned HTTP {response.status}')
+              with urllib.request.urlopen('http://127.0.0.1:8787/api/search?q=k-on&source=animego', timeout=30) as response:
+                  if response.status != 200:
+                      raise SystemExit(f'portable search check returned HTTP {response.status}')
               if (launch_cwd / 'data').exists() or (launch_cwd / 'library').exists():
                   raise SystemExit('portable runtime files leaked into launch working directory')
           finally:

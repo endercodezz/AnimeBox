@@ -25,6 +25,7 @@ if [[ ! -f "$ANICLI/pyproject.toml" ]]; then
 else
   echo "==> anicli-api checkout: OK"
 fi
+python3 "$ROOT/scripts/patch_anicli.py"
 
 PYTHON="$ROOT/.venv/bin/python"
 if [[ ! -x "$PYTHON" ]] || ! "$PYTHON" -c 'import sys' >/dev/null 2>&1; then
