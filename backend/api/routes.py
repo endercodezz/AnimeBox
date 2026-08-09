@@ -81,6 +81,17 @@ async def search(
         raise HTTPException(502, f"Search failed: {exc}") from exc
 
 
+@router.get("/anime/{anime_id:path}/episodes/{episode}/voiceovers", response_model=list[VoiceoverOption])
+async def episode_voiceovers(anime_id: str, episode: int):
+    reg = get_registry()
+    try:
+        return await reg.get_episode_voiceovers(anime_id, episode)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
 @router.get("/anime/{anime_id:path}", response_model=AnimeDetail)
 async def anime_detail(anime_id: str, voiceovers: bool = False, db: AsyncSession = Depends(get_db)):
     reg = get_registry()
@@ -113,17 +124,6 @@ async def anime_detail(anime_id: str, voiceovers: bool = False, db: AsyncSession
         row.year = detail.year
     await db.commit()
     return detail
-
-
-@router.get("/anime/{anime_id:path}/episodes/{episode}/voiceovers", response_model=list[VoiceoverOption])
-async def episode_voiceovers(anime_id: str, episode: int):
-    reg = get_registry()
-    try:
-        return await reg.get_episode_voiceovers(anime_id, episode)
-    except LookupError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(502, str(exc)) from exc
 
 
 @router.post("/stream/resolve", response_model=StreamResolveResponse)

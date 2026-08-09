@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 import sys
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite+aiosqlite:///{(ROOT_DIR / 'data' / 'animebox.db').as_posix()}"
     log_level: str = "INFO"
     http_proxy: str | None = None
+    provider_search_timeout: float = Field(default=10.0, gt=0)
     preferred_voiceovers: str = "Aniliberty,Animevost,AniLibria,AnimeVost"
     default_quality: int = 1080
     steam_deck_crf: int = 23

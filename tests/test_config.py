@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy.engine import make_url
 
 import backend.config as config
@@ -37,6 +39,17 @@ def test_absolute_and_memory_database_urls_are_preserved(monkeypatch, tmp_path: 
 
     assert Path(make_url(absolute_settings.database_url).database) == absolute
     assert memory_settings.database_url == "sqlite+aiosqlite:///:memory:"
+
+
+def test_provider_search_timeout_is_configurable() -> None:
+    assert config.Settings(_env_file=None).provider_search_timeout == 10.0
+    assert config.Settings(_env_file=None, provider_search_timeout=2.5).provider_search_timeout == 2.5
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_provider_search_timeout_must_be_positive(value: float) -> None:
+    with pytest.raises(ValidationError):
+        config.Settings(_env_file=None, provider_search_timeout=value)
 
 
 def test_get_settings_creates_custom_database_parent(monkeypatch, tmp_path: Path) -> None:

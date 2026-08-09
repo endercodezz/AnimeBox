@@ -220,14 +220,27 @@ class ProviderRegistry:
     async def search(self, query: str, sources: list[str] | None = None) -> list[SearchResult]:
         sources = sources or list(DEFAULT_SOURCES)
         batches = await asyncio.gather(
-            *[self._search_one(source, query) for source in sources],
+            *[
+                asyncio.wait_for(
+                    self._search_one(source, query),
+                    timeout=self.settings.provider_search_timeout,
+                )
+                for source in sources
+            ],
             return_exceptions=True,
         )
         results: list[SearchResult] = []
         seen: set[str] = set()
-        for batch in batches:
+        for source, batch in zip(sources, batches, strict=True):
+            if isinstance(batch, TimeoutError):
+                logger.warning(
+                    "Search timed out for %s after %.1fs",
+                    source,
+                    self.settings.provider_search_timeout,
+                )
+                continue
             if isinstance(batch, Exception):
-                logger.warning("Search failed: %s", batch)
+                logger.warning("Search failed for %s: %s", source, batch)
                 continue
             for item in batch:
                 key = f"{item.source}:{item.title.lower()}"

@@ -3,6 +3,16 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { AnimeDetail, LibraryEpisode, VoiceoverOption } from '../api/types'
 
+function uniqueVoiceovers(options: VoiceoverOption[]): VoiceoverOption[] {
+  const seen = new Set<string>()
+  return options.filter((option) => {
+    const key = option.title.trim().toLocaleLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 export function AnimePage() {
   const { '*': rawId = '' } = useParams()
   const id = decodeURIComponent(rawId)
@@ -58,16 +68,15 @@ export function AnimePage() {
   }, [id, localMode])
 
   const episodes = useMemo(() => detail?.episodes || [], [detail])
+  const firstEpisode = episodes[0]?.ordinal
+  const seasonVoices = firstEpisode ? voiceMap[firstEpisode] || [] : []
 
   async function loadVoiceovers(ep: number): Promise<VoiceoverOption[]> {
     if (voiceMap[ep]) return voiceMap[ep]
     setLoadingVoices(ep)
     try {
-      const list = await api.voiceovers(id, ep)
+      const list = uniqueVoiceovers(await api.voiceovers(id, ep))
       setVoiceMap((m) => ({ ...m, [ep]: list }))
-      if (list[0] && !selectedVoice[ep]) {
-        setSelectedVoice((s) => ({ ...s, [ep]: list[0].title }))
-      }
       return list
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Озвучки недоступны')
@@ -77,16 +86,23 @@ export function AnimePage() {
     }
   }
 
+  function effectiveVoiceover(ep: number): string | undefined {
+    return selectedVoice[ep] ?? (seasonVoice || undefined)
+  }
+
+  function selectSeasonVoiceover(voiceover: string) {
+    setSeasonVoice(voiceover)
+    setSelectedVoice({})
+  }
+
   async function downloadEpisode(ep: number) {
     setBusy(true)
     setMessage(null)
     try {
-      const list = await loadVoiceovers(ep)
-      const voice = selectedVoice[ep] || list[0]?.title
       await api.createDownloads({
         anime_id: id,
         episode: ep,
-        voiceover: voice || null,
+        voiceover: effectiveVoiceover(ep) || null,
       })
       setMessage(`Эпизод ${ep} добавлен в очередь`)
     } catch (err) {
@@ -116,7 +132,7 @@ export function AnimePage() {
   }
 
   function playEpisode(ep: number, localId?: number, voiceover?: string) {
-    const voice = voiceover || selectedVoice[ep]
+    const voice = voiceover || effectiveVoiceover(ep)
     const qs = new URLSearchParams({ episode: String(ep) })
     if (voice) qs.set('voiceover', voice)
     if (localId) qs.set('local', String(localId))
@@ -128,8 +144,7 @@ export function AnimePage() {
       playEpisode(ep, localId)
       return
     }
-    const list = await loadVoiceovers(ep)
-    playEpisode(ep, undefined, selectedVoice[ep] || list[0]?.title)
+    playEpisode(ep)
   }
 
   if (error && !detail) {
@@ -152,18 +167,66 @@ export function AnimePage() {
             <div><p className="eyebrow">{[detail.source, detail.year].filter(Boolean).join(' · ')}</p><h1 className="mt-2 max-w-4xl font-display text-4xl font-extrabold leading-tight tracking-[-0.045em] sm:text-5xl lg:text-6xl">{detail.title}</h1></div>
             {detail.description && <p className="max-w-3xl text-sm leading-7 text-fog sm:text-base">{detail.description}</p>}
             {!localMode && (
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="min-w-56 space-y-1">
-                  <span className="block text-xs font-bold uppercase tracking-wider text-fog">Озвучка сезона</span>
-                  <input
-                    value={seasonVoice}
-                    onChange={(e) => setSeasonVoice(e.target.value)}
-                    className="w-full rounded-xl border border-white/8 bg-ink-3 px-3 py-2.5 text-sm text-paper outline-none focus:border-amber/50"
-                    placeholder="Автовыбор или название"
-                  />
-                </label>
-                <button type="button" disabled={busy} onClick={downloadSeason} className="btn-primary">↓ Скачать сезон</button>
-                <Link to="/downloads" className="btn-secondary">Очередь загрузок</Link>
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-fog">Озвучка сезона</p>
+                    <p className="mt-1 text-xs text-fog">Для просмотра и загрузок всех серий</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!firstEpisode || loadingVoices === firstEpisode}
+                    onClick={() => firstEpisode && void loadVoiceovers(firstEpisode)}
+                    className="btn-secondary px-3 py-2 text-sm"
+                  >
+                    {loadingVoices === firstEpisode
+                      ? 'Загрузка…'
+                      : seasonVoices.length
+                        ? 'Обновить список'
+                        : 'Выбрать озвучку'}
+                  </button>
+                  <button type="button" disabled={busy} onClick={downloadSeason} className="btn-primary">↓ Скачать сезон</button>
+                  <Link to="/downloads" className="btn-secondary">Очередь загрузок</Link>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <label
+                    className={[
+                      'cursor-pointer rounded-full px-3 py-1 text-xs ring-1 transition',
+                      !seasonVoice
+                        ? 'bg-amber/20 text-violet-soft ring-amber/50'
+                        : 'bg-black/20 text-fog ring-white/10 hover:bg-white/5 hover:text-paper',
+                    ].join(' ')}
+                  >
+                    <input
+                      type="radio"
+                      className="sr-only"
+                      name="season-voice"
+                      checked={!seasonVoice}
+                      onChange={() => selectSeasonVoiceover('')}
+                    />
+                    Автовыбор
+                  </label>
+                  {seasonVoices.map((voice) => (
+                    <label
+                      key={voice.title}
+                      className={[
+                        'cursor-pointer rounded-full px-3 py-1 text-xs ring-1 transition',
+                        seasonVoice === voice.title
+                          ? 'bg-amber/20 text-violet-soft ring-amber/50'
+                          : 'bg-black/20 text-fog ring-white/10 hover:bg-white/5 hover:text-paper',
+                      ].join(' ')}
+                    >
+                      <input
+                        type="radio"
+                        className="sr-only"
+                        name="season-voice"
+                        checked={seasonVoice === voice.title}
+                        onChange={() => selectSeasonVoiceover(voice.title)}
+                      />
+                      {voice.title}
+                    </label>
+                  ))}
+                </div>
               </div>
             )}
             {localMode && <span className="w-fit rounded-full bg-ok/12 px-3 py-1 text-xs font-bold text-ok">Доступно офлайн</span>}
@@ -203,9 +266,32 @@ export function AnimePage() {
                 </div>
                 {voices.length > 0 && (
                   <div className="flex flex-wrap gap-2">
+                    <label
+                      className={[
+                        'cursor-pointer rounded-full px-3 py-1 text-xs ring-1 transition',
+                        selectedVoice[ep.ordinal] === undefined
+                          ? 'bg-amber/20 text-violet-soft ring-amber/50'
+                          : 'bg-black/20 text-fog ring-white/10 hover:bg-white/5 hover:text-paper',
+                      ].join(' ')}
+                    >
+                      <input
+                        type="radio"
+                        className="sr-only"
+                        name={`voice-${ep.ordinal}`}
+                        checked={selectedVoice[ep.ordinal] === undefined}
+                        onChange={() =>
+                          setSelectedVoice((current) => {
+                            const next = { ...current }
+                            delete next[ep.ordinal]
+                            return next
+                          })
+                        }
+                      />
+                      Как для сезона{seasonVoice ? ` · ${seasonVoice}` : ' · автовыбор'}
+                    </label>
                     {voices.map((v) => (
                       <label
-                        key={`${v.index}-${v.title}`}
+                        key={v.title}
                         className={[
                           'cursor-pointer rounded-full px-3 py-1 text-xs ring-1 transition',
                           selectedVoice[ep.ordinal] === v.title
