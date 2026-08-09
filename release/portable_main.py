@@ -12,8 +12,6 @@ from pathlib import Path
 
 import uvicorn
 
-from backend.main import app
-
 
 def portable_root() -> Path:
     return Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
@@ -65,8 +63,11 @@ def wait_and_open(url: str) -> None:
 
 def main() -> int:
     root = portable_root()
-    os.chdir(root)
     ensure_runtime_files(root)
+    os.chdir(root)
+
+    from backend.main import app
+
     log_path = root / "data" / "animebox.log"
     logging.basicConfig(
         level=logging.INFO,

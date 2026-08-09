@@ -99,9 +99,11 @@ jobs:
           exe = (folder / ('AnimeBox.exe' if platform.system() == 'Windows' else 'AnimeBox')).resolve()
           env = dict(os.environ)
           env['PATH'] = str((folder / 'tools').resolve()) + os.pathsep + env.get('PATH', '')
+          launch_cwd = pathlib.Path('release/smoke-cwd').resolve()
+          launch_cwd.mkdir(parents=True, exist_ok=True)
           proc = subprocess.Popen(
               [str(exe)],
-              cwd=str(folder.resolve()),
+              cwd=str(launch_cwd),
               env=env,
               stdout=subprocess.PIPE,
               stderr=subprocess.STDOUT,
@@ -122,6 +124,10 @@ jobs:
               else:
                   output = proc.stdout.read() if proc.poll() is not None and proc.stdout else ''
                   raise SystemExit(f'portable app failed health check:\n{output}')
+              if not (folder / 'data' / 'animebox.db').is_file():
+                  raise SystemExit('portable database was not created inside package data directory')
+              if (launch_cwd / 'data').exists() or (launch_cwd / 'library').exists():
+                  raise SystemExit('portable runtime files leaked into launch working directory')
           finally:
               if proc.poll() is None:
                   proc.terminate()
