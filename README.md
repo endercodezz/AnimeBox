@@ -4,7 +4,7 @@
 
 A local anime library for searching, watching, and traveling without internet access. AnimeBox runs on your computer, stores episodes as regular files, and requires no account or cloud service.
 
-> **Status:** early MVP. Source websites can change without notice, so individual providers may temporarily stop working.
+> **Status:** early MVP. Many bugs remain, and active development is ongoing. Source websites can change without notice, so individual providers may temporarily stop working.
 
 ## Features
 
@@ -22,6 +22,8 @@ A local anime library for searching, watching, and traveling without internet ac
 ## Interface
 
 AnimeBox uses a dark cinematic interface with a violet accent. After launch, open `http://127.0.0.1:8787`. On a title page, choose a **Season voiceover**; it applies to playback and downloads for every episode. You can still open a specific episode's voiceover list and set an override for that episode. **Auto-select** follows the voiceover priority from Settings and uses the first available option when no preferred voiceover is present.
+
+> **Download recommendation:** the author recommends choosing **AnimeGO** whenever it is available because it currently works best and provides the most stable downloads.
 
 The **Shut down** button in the header stops the local server cleanly and releases port `8787`. Closing the browser tab alone does not stop the server, protecting active downloads from accidental interruption.
 
