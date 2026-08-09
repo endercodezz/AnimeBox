@@ -1,61 +1,62 @@
 # AnimeBox
 
-Локальная аниме-библиотека для поиска, просмотра и поездок без интернета. AnimeBox запускается на вашем компьютере, сохраняет серии в обычные файлы и не требует аккаунта или облачного сервиса.
+**English** | [Русский](README.ru.md)
 
-> **Статус:** ранний MVP. Сайты-источники меняются без предупреждения, поэтому отдельные провайдеры могут временно переставать работать.
+A local anime library for searching, watching, and traveling without internet access. AnimeBox runs on your computer, stores episodes as regular files, and requires no account or cloud service.
 
-## Что умеет
+> **Status:** early MVP. Source websites can change without notice, so individual providers may temporarily stop working.
 
-| Возможность | Статус |
+## Features
+
+| Feature | Status |
 |---|---|
-| Поиск по нескольким источникам | ✅ |
-| Карточка тайтла, серии и озвучки | ✅ |
-| Онлайн-просмотр HLS через локальный proxy | ✅ |
-| Загрузка серии или сезона | 🟨 |
-| Очередь, прогресс, отмена и повтор | ✅ |
-| Локальная библиотека и офлайн-плеер | ✅ |
-| Сохранение прогресса просмотра | ✅ |
-| Оптимизация под Steam Deck | ✅ |
+| Search across multiple sources | ✅ |
+| Title details, episodes, and voiceovers | ✅ |
+| Online HLS playback through a local proxy | ✅ |
+| Episode or season downloads | 🟨 |
+| Download queue, progress, cancellation, and retry | ✅ |
+| Local library and offline player | ✅ |
+| Saved watch progress | ✅ |
+| Steam Deck optimization | ✅ |
 
-## Интерфейс
+## Interface
 
-AnimeBox использует тёмный кинематографичный интерфейс с фиолетовым акцентом. После запуска откройте `http://127.0.0.1:8787`. На странице тайтла нажмите **Выбрать озвучку**, отметьте вариант для серии, затем запускайте просмотр или скачивание; глобальный список в настройках нужен только для автоматического выбора по умолчанию.
+AnimeBox uses a dark cinematic interface with a violet accent. After launch, open `http://127.0.0.1:8787`. On a title page, choose a **Season voiceover**; it applies to playback and downloads for every episode. You can still open a specific episode's voiceover list and set an override for that episode. **Auto-select** follows the voiceover priority from Settings and uses the first available option when no preferred voiceover is present.
 
-Кнопка **Выключить** в шапке корректно останавливает локальный сервер и освобождает порт `8787`. Простое закрытие вкладки браузера сервер не завершает: это защищает активные загрузки от случайного закрытия окна.
+The **Shut down** button in the header stops the local server cleanly and releases port `8787`. Closing the browser tab alone does not stop the server, protecting active downloads from accidental interruption.
 
-## Как устроен portable build
+## How the portable build works
 
-В архиве нет двух отдельных приложений. `AnimeBox.exe`/`AnimeBox` — один Python launcher с FastAPI backend и встроенными статическими файлами уже собранного React/TypeScript frontend. Node.js в архив не входит и на устройстве пользователя не запускается: браузер получает обычные HTML/CSS/JavaScript файлы от локального backend.
+The archive does not contain two separate applications. `AnimeBox.exe`/`AnimeBox` is one Python launcher with a FastAPI backend and embedded static files from the prebuilt React/TypeScript frontend. Node.js is not included in the archive and does not run on the user's device; the browser receives regular HTML/CSS/JavaScript files from the local backend.
 
-Каталог `.references/` содержит только локальные checkout исходных open-source проектов и не публикуется в Git. Скрипты установки и CI клонируют `anicli-api`, затем применяют отслеживаемый compatibility patch из `patches/`. Поэтому обязательные изменения больше не прячутся внутри полностью игнорируемого checkout.
+The `.references/` directory contains local checkouts of upstream open-source projects and is not committed to Git. Installation scripts and CI clone `anicli-api`, then apply the tracked compatibility patch from `patches/`. Required compatibility changes therefore do not remain hidden inside a fully ignored checkout.
 
+## Portable releases
 
-## Portable Releases
+For most users, the recommended option is to download the archive for their platform from GitHub Releases. Python, Node.js, Git, and a system FFmpeg installation are not required: the Python runtime, backend, compiled frontend, `anicli-api`, and FFmpeg are included.
 
-Рекомендуемый способ для обычного пользователя — скачать готовый архив своей платформы из GitHub Releases. Python, Node.js, Git и системный ffmpeg не нужны: Python runtime, backend, собранный frontend, `anicli-api` и ffmpeg уже включены.
+AnimeBox remains a web application: the launcher starts a private server at `http://127.0.0.1:8787` and opens the system browser. No separate desktop interface is installed.
 
-AnimeBox остаётся web-приложением: launcher поднимает приватный сервер на `http://127.0.0.1:8787` и открывает системный браузер. Отдельный desktop-интерфейс не устанавливается.
-
-| Архив | Запуск |
+| Archive | How to run |
 |---|---|
-| `AnimeBox-Windows-x64.zip` | распаковать и открыть `AnimeBox.exe` |
-| `AnimeBox-Linux-x64.tar.gz` | Linux x86_64, включая Steam Deck/SteamOS; распаковать, выполнить `chmod +x AnimeBox && ./AnimeBox` |
-| `AnimeBox-macOS-x64.zip` | Intel Mac; распаковать и открыть launcher |
-| `AnimeBox-macOS-arm64.zip` | Apple Silicon; распаковать и открыть launcher |
+| `AnimeBox-Windows-x64.zip` | extract the archive and open `AnimeBox.exe` |
+| `AnimeBox-Linux-x64.tar.gz` | Linux x86_64, including Steam Deck/SteamOS; extract, then run `chmod +x AnimeBox && ./AnimeBox` |
+| `AnimeBox-macOS-x64.zip` | Intel Mac; extract and open the launcher |
+| `AnimeBox-macOS-arm64.zip` | Apple Silicon; extract and open the launcher |
 
-Portable-папка уже содержит базовый `.env`, `data/`, `library/`, bundled ffmpeg и все runtime-зависимости. Интернет нужен только для поиска, получения новых потоков и загрузки. Уже скачанная библиотека, локальные постеры, MP4 и прогресс просмотра работают офлайн; внешние web-шрифты не используются.
+The portable folder already contains a base `.env`, `data/`, `library/`, bundled FFmpeg, and all runtime dependencies. Windows and Linux/Steam Deck archives use GPL FFmpeg builds from BtbN; macOS archives use Homebrew builds. Internet access is required only for search, fetching new streams, and downloads. The downloaded library, local posters, MP4 files, and watch progress work offline; no external web fonts are used.
 
-При обновлении сохраните и перенесите в новую portable-папку:
+When updating, preserve and move these items into the new portable folder:
 
-- `.env` — настройки;
-- `data/` — база, история и прогресс;
-- `library/` — скачанные серии и постеры.
+- `.env` — settings;
+- `data/` — database, history, and progress;
+- `library/` — downloaded episodes and posters.
 
-На неподписанном macOS build при первом запуске может потребоваться **Control-click → Open**. Portable archive нужно полностью распаковать перед запуском.
+An unsigned macOS build may require **Control-click → Open** on first launch. Fully extract the portable archive before running AnimeBox.
 
-## Быстрый старт из исходников
+## Quick start from source
 
-Для запуска из исходников нужны Python 3.12+, Node.js 20+ с npm, Git и ffmpeg в `PATH`. Docker не требуется. Install-скрипт сам скачивает официальный `anicli-api` (MIT) в `.references/anicli-api`; остальные reference-проекты нужны только разработчикам.
+Running from source requires Python 3.12+, Node.js 20+ with npm, Git, and FFmpeg in `PATH`. Docker is not required. The installation script downloads the official `anicli-api` repository (MIT) into `.references/anicli-api`; the other reference projects are needed only for development.
 
 ### Windows 11
 
@@ -66,9 +67,9 @@ cd AnimeBox
 .\scripts\run.ps1
 ```
 
-Можно запустить двойным кликом: сначала `scripts\install.cmd`, затем `scripts\run.cmd`. Диагностика: `scripts\check.cmd`.
+Double-click launch is also available: run `scripts\install.cmd`, then `scripts\run.cmd`. For diagnostics, use `scripts\check.cmd`.
 
-При первом `install` или `run` автоматически создаётся базовый `.env` из `.env.example`. Существующий `.env` никогда не перезаписывается.
+The first `install` or `run` creates a base `.env` from `.env.example`. An existing `.env` is never overwritten.
 
 ### macOS / Linux / Steam Deck
 
@@ -80,7 +81,7 @@ chmod +x scripts/*.sh
 ./scripts/run.sh
 ```
 
-### Режим разработки
+### Development mode
 
 ```powershell
 # Windows
@@ -93,12 +94,12 @@ chmod +x scripts/*.sh
 ```
 
 - Production UI + API: `http://127.0.0.1:8787`
-- Vite UI в dev-режиме: `http://127.0.0.1:5173`
+- Vite UI in development mode: `http://127.0.0.1:5173`
 - OpenAPI: `http://127.0.0.1:8787/docs`
 
-`run` собирает frontend, запускает API, ждёт успешный health-check и только затем открывает браузер. Используйте `--skip-build` / `-SkipBuild`, чтобы оставить существующую сборку, и `--no-browser` / `-NoBrowser`, чтобы не открывать браузер.
+`run` builds the frontend, starts the API, waits for a successful health check, and only then opens the browser. Use `--skip-build` / `-SkipBuild` to keep the existing frontend build and `--no-browser` / `-NoBrowser` to avoid opening the browser.
 
-Проверить установку без запуска загрузки:
+Check the installation without starting a download:
 
 ```powershell
 .\scripts\check.ps1
@@ -108,20 +109,21 @@ chmod +x scripts/*.sh
 ./scripts/check.sh
 ```
 
-## Настройка
+## Configuration
 
-При первом запуске `.env.example` копируется в `.env`. Основные параметры:
+On first launch, `.env.example` is copied to `.env`. Main options:
 
-- `LIBRARY_PATH` — каталог загруженных серий;
+- `LIBRARY_PATH` — downloaded episode directory;
 - `DATABASE_URL` — SQLite URL;
-- `HTTP_PROXY` — необязательный HTTP/SOCKS proxy для ограниченных источников;
-- `PREFERRED_VOICEOVERS` — приоритет озвучек через запятую;
-- `DEFAULT_QUALITY` — желаемое качество;
-- `STEAM_DECK_CRF`, `STEAM_DECK_HEIGHT` — параметры перекодирования.
+- `HTTP_PROXY` — optional HTTP/SOCKS proxy for restricted sources;
+- `PROVIDER_SEARCH_TIMEOUT` — maximum wait for each search provider, `10` seconds by default; slow or blocked providers are skipped while results from available providers are returned;
+- `PREFERRED_VOICEOVERS` — comma-separated voiceover priority for automatic selection;
+- `DEFAULT_QUALITY` — preferred quality;
+- `STEAM_DECK_CRF`, `STEAM_DECK_HEIGHT` — transcoding settings.
 
-Большинство пользовательских параметров также доступны на странице **Настройки**.
+Most user-facing options are also available on the **Settings** page.
 
-## Где хранятся данные
+## Data storage
 
 ```text
 library/
@@ -137,9 +139,9 @@ data/
 └── search_cache/
 ```
 
-`library/`, база, cache и `.env` исключены из Git.
+`library/`, the database, cache, and `.env` are excluded from Git.
 
-## Архитектура
+## Architecture
 
 ```text
 backend/
@@ -158,9 +160,9 @@ frontend/src/
 └── pages/        # search, library, anime, player, downloads, settings
 ```
 
-Backend: Python, FastAPI, async SQLAlchemy, SQLite, Pydantic, httpx. Frontend: React, TypeScript, Tailwind CSS, Vite, hls.js.
+Backend: Python, FastAPI, async SQLAlchemy, SQLite, Pydantic, and httpx. Frontend: React, TypeScript, Tailwind CSS, Vite, and hls.js.
 
-## Проверки
+## Verification
 
 ```bash
 # Backend
@@ -173,44 +175,44 @@ npm run lint
 npm run build
 ```
 
-Для runtime-проверки запустите AnimeBox, найдите тайтл, откройте серию, загрузите её и затем воспроизведите через раздел **Библиотека**.
+For a runtime check, start AnimeBox, search for a title, choose a season voiceover, open an episode, download it, and then play it from **Library**.
 
-## Решение проблем
+## Troubleshooting
 
 ### `venv not found`
 
-Запустите `scripts/install.ps1` или `scripts/install.sh`. Если окружение перенесли между каталогами или компьютерами, удалите `.venv` и повторите установку.
+Run `scripts/install.ps1` or `scripts/install.sh`. If the environment was moved between directories or computers, delete `.venv` and install again.
 
-### Поиск работает, но поток не открывается
+### Search works, but the stream does not open
 
-- попробуйте другую озвучку или источник;
-- проверьте доступность сайта в вашем регионе;
-- задайте `HTTP_PROXY` в `.env` или интерфейсе;
-- изучите сообщения backend в терминале.
+- try another voiceover or source;
+- check whether the source website is available in your region;
+- configure `HTTP_PROXY` in `.env` or the interface;
+- inspect backend messages in the terminal.
 
 ### `Search cache expired`
 
-Повторите поиск тайтла и откройте его из новых результатов. AnimeBox не хранит вечные ссылки на страницы источников.
+Search for the title again and open it from the new results. AnimeBox does not permanently store links to source pages.
 
-### Загрузка требует ffmpeg
+### Downloads require FFmpeg
 
-Установите ffmpeg и убедитесь, что команда `ffmpeg -version` работает в новом терминале. HLS/DASH и оптимизация Steam Deck без ffmpeg недоступны.
+When running from source, install FFmpeg and confirm that `ffmpeg -version` works in a new terminal. HLS/DASH downloads and Steam Deck optimization are unavailable without FFmpeg. Portable archives already include FFmpeg.
 
-### Источник внезапно перестал работать
+### A source suddenly stopped working
 
-Провайдер мог изменить HTML/API либо быть недоступен у вашего интернет-провайдера. Если таймауты возникают только для одного домена, а остальные источники отвечают, portable build не сломан — это сетевой маршрут или блокировка конкретного источника. При необходимости задайте HTTP/SOCKS proxy в настройках. Не редактируйте `.references/anicli-api` вручную: пересоздайте checkout через скрипт установки, а compatibility-изменения храните в `patches/`.
+The provider may have changed its HTML/API or may be unavailable through your internet provider. AnimeBox waits no longer than `PROVIDER_SEARCH_TIMEOUT` for each source and returns results from available providers. If only one domain fails, the portable build is not necessarily broken—it may be a routing issue or source-specific block. Configure an HTTP/SOCKS proxy in Settings when needed. Do not edit `.references/anicli-api` manually: recreate the checkout with the installation script and keep compatibility changes in `patches/`.
 
-## Правовые сведения
+## Legal notice
 
-AnimeBox — локальный клиент и не размещает медиаконтент. Используйте приложение только для контента и источников, доступ к которым разрешён применимым законодательством и правилами сервиса. Пользователь отвечает за выбор источников и сохранение файлов.
+AnimeBox is a local client and does not host media content. Use it only with content and sources permitted by applicable law and service terms. The user is responsible for choosing sources and saving files.
 
 ## Credits
 
-AnimeBox использует или изучает наработки:
+AnimeBox uses or studies work from:
 
-- [anicli-api](https://github.com/vypivshiy/anicli-api) — извлечение каталога, серий, озвучек и потоков;
-- [ani-cli-ru](https://github.com/vypivshiy/ani-cli-ru) — UX и reverse-proxy подход;
-- [HakuNeko](https://github.com/manga-download/hakuneko) — архитектура коннекторов и загрузок;
-- [Sonarr](https://github.com/Sonarr/Sonarr) — идеи устойчивой очереди, импорта и медиатеки.
+- [anicli-api](https://github.com/vypivshiy/anicli-api) — catalog, episode, voiceover, and stream extraction;
+- [ani-cli-ru](https://github.com/vypivshiy/ani-cli-ru) — UX and reverse-proxy approach;
+- [HakuNeko](https://github.com/manga-download/hakuneko) — connector and downloader architecture;
+- [Sonarr](https://github.com/Sonarr/Sonarr) — ideas for durable queues, imports, and media libraries.
 
-Подробные лицензии и границы переиспользования: [THIRD_PARTY.md](THIRD_PARTY.md).
+Detailed licenses and reuse boundaries: [THIRD_PARTY.md](THIRD_PARTY.md).

@@ -16,7 +16,7 @@ jobs:
         include:
           - os: windows-latest
             name: Windows-x64
-            ffmpeg_url: https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+            ffmpeg_url: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip
             target_name: AnimeBox-Windows-x64
           - os: ubuntu-latest
             name: Linux-x64
@@ -71,10 +71,37 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Invoke-WebRequest '${{ matrix.ffmpeg_url }}' -OutFile ffmpeg.zip
+          $url = '${{ matrix.ffmpeg_url }}'
+          $curlArgs = @(
+            '--fail', '--location',
+            '--retry', '5', '--retry-delay', '5', '--retry-all-errors',
+            '--connect-timeout', '30', '--max-time', '600'
+          )
+
+          & curl.exe @curlArgs --output ffmpeg.zip $url
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg download failed with curl exit code ${LASTEXITCODE}: $url" }
+
+          $archive = Get-Item ffmpeg.zip -ErrorAction Stop
+          if ($archive.Length -le 0) { throw 'downloaded ffmpeg archive is empty' }
+          $actual = (Get-FileHash ffmpeg.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "ffmpeg archive: $($archive.Length) bytes, SHA-256 $actual"
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($archive.FullName)
+          try {
+            $ffmpegEntry = $zip.Entries | Where-Object { $_.FullName -match '(^|/)bin/ffmpeg\.exe$' } | Select-Object -First 1
+            if (-not $ffmpegEntry) { throw 'ffmpeg archive does not contain bin/ffmpeg.exe' }
+          } finally {
+            $zip.Dispose()
+          }
+
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-package
-          $ffmpeg = Get-ChildItem ffmpeg-package -Recurse -Filter ffmpeg.exe | Select-Object -First 1
-          if (-not $ffmpeg) { throw 'ffmpeg.exe not found in downloaded archive' }
+          $ffmpeg = Get-ChildItem ffmpeg-package -Recurse -File -Filter ffmpeg.exe |
+            Where-Object { $_.FullName -match '[\\/]bin[\\/]ffmpeg\.exe$' } |
+            Select-Object -First 1
+          if (-not $ffmpeg) { throw 'ffmpeg.exe not found after archive extraction' }
+          & $ffmpeg.FullName -version
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg executable check failed with exit code $LASTEXITCODE" }
           "FFMPEG_PATH=$($ffmpeg.FullName)" | Out-File $env:GITHUB_ENV -Append
 
       - name: Locate native ffmpeg on macOS
