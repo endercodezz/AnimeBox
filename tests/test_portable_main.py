@@ -11,6 +11,15 @@ def test_portable_module_does_not_import_backend_app() -> None:
     assert "app" not in portable_main.__dict__
 
 
+def test_print_banner_outputs_animebox_art(capsys) -> None:
+    portable_main.print_banner()
+
+    output = capsys.readouterr().out
+    assert "_                  ____" in output
+    assert "| |_) | _____" in output
+    assert output.endswith("\n")
+
+
 def test_main_prepares_root_before_importing_app(monkeypatch, tmp_path: Path) -> None:
     root = tmp_path / "AnimeBox"
     foreign_cwd = tmp_path / "foreign"

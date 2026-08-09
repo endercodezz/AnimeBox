@@ -15,6 +15,6 @@ Generated files:
 - `release/dist/` — raw one-folder application;
 - `release/artifacts/` — ready folder, archive and SHA-256.
 
-End-user archive contains Python runtime, backend dependencies, prebuilt frontend, anicli-api, ffmpeg, ready `.env`, `data/` and `library/`. Python/Node/Git are not required to run it.
+End-user archive contains Python runtime, backend dependencies, prebuilt frontend, anicli-api, ffmpeg, ready `.env`, `data/` and `library/`. Python/Node/Git are not required to run it. On macOS, the builder recursively bundles FFmpeg's non-system dylibs under `tools/lib/`, rewrites Mach-O load paths, ad-hoc signs the relocated binaries, and rejects remaining Homebrew paths.
 
 macOS artifacts are unsigned unless signing/notarization secrets are configured in CI. Windows artifacts are unsigned unless a signing certificate is configured.

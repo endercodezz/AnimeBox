@@ -46,7 +46,7 @@ AnimeBox remains a web application: the launcher starts a private server at `htt
 | `AnimeBox-macOS-x64.zip` | Intel Mac; extract and open the launcher |
 | `AnimeBox-macOS-arm64.zip` | Apple Silicon; extract and open the launcher |
 
-The portable folder already contains a base `.env`, `data/`, `library/`, bundled FFmpeg, and all runtime dependencies. Windows and Linux/Steam Deck archives use GPL FFmpeg builds from BtbN; macOS archives use Homebrew builds. Internet access is required only for search, fetching new streams, and downloads. The downloaded library, local posters, MP4 files, and watch progress work offline; no external web fonts are used.
+The portable folder already contains a base `.env`, `data/`, `library/`, bundled FFmpeg, and all runtime dependencies. Windows and Linux/Steam Deck archives use GPL FFmpeg builds from BtbN; macOS archives bundle FFmpeg with its relocated Homebrew libraries, so Homebrew is not required on the user's Mac. Internet access is required only for search, fetching new streams, and downloads. The downloaded library, local posters, MP4 files, and watch progress work offline; no external web fonts are used.
 
 When updating, preserve and move these items into the new portable folder:
 

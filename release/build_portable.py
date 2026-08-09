@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+from collections import deque
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,6 +22,10 @@ ARTIFACTS = RELEASE / "artifacts"
 def run(*args: str, cwd: Path = ROOT) -> None:
     print("+", " ".join(args), flush=True)
     subprocess.run(args, cwd=cwd, check=True)
+
+
+def output(*args: str) -> str:
+    return subprocess.run(args, check=True, capture_output=True, text=True).stdout
 
 
 def target_name(explicit: str | None = None) -> str:
@@ -50,6 +55,78 @@ def find_ffmpeg(explicit: str | None) -> Path:
     raise RuntimeError("ffmpeg not found; pass --ffmpeg PATH")
 
 
+def macos_dependencies(binary: Path) -> list[tuple[str, Path]]:
+    dependencies: list[tuple[str, Path]] = []
+    lines = output("otool", "-L", str(binary)).splitlines()[1:]
+    dylib_id = output("otool", "-D", str(binary)).splitlines()[1:]
+    own_id = dylib_id[0].strip() if dylib_id else None
+    for line in lines:
+        load_path = line.strip().split(" (compatibility version", 1)[0]
+        if load_path == own_id or load_path.startswith(("/usr/lib/", "/System/Library/")):
+            continue
+        if load_path.startswith(("@loader_path/", "@executable_path/", "@rpath/")):
+            raise RuntimeError(f"cannot resolve existing relative dependency {load_path} in {binary}")
+        path = Path(load_path)
+        if not path.is_file():
+            raise RuntimeError(f"missing FFmpeg dependency {load_path}")
+        dependencies.append((load_path, path.resolve()))
+    return dependencies
+
+
+def bundle_macos_ffmpeg(ffmpeg: Path, tools: Path) -> Path:
+    executable = tools / "ffmpeg"
+    shutil.copy2(ffmpeg, executable)
+    executable.chmod(0o755)
+
+    library_dir = tools / "lib"
+    library_dir.mkdir()
+    queue = deque([executable])
+    dependencies_by_binary: dict[Path, list[tuple[str, Path]]] = {}
+    copied: dict[Path, Path] = {}
+
+    while queue:
+        binary = queue.popleft()
+        dependencies = macos_dependencies(binary)
+        dependencies_by_binary[binary] = dependencies
+        for _load_path, dependency in dependencies:
+            if dependency in copied:
+                continue
+            destination = library_dir / dependency.name
+            conflicting = next((source for source, target in copied.items() if target == destination), None)
+            if conflicting:
+                raise RuntimeError(
+                    f"FFmpeg dependency name collision: {conflicting} and {dependency} both map to {destination.name}"
+                )
+            shutil.copy2(dependency, destination)
+            copied[dependency] = destination
+            queue.append(destination)
+
+    for binary, dependencies in dependencies_by_binary.items():
+        for load_path, dependency in dependencies:
+            bundled = copied[dependency]
+            relative = f"@loader_path/lib/{bundled.name}" if binary == executable else f"@loader_path/{bundled.name}"
+            run("install_name_tool", "-change", load_path, relative, str(binary))
+        if binary != executable:
+            run("install_name_tool", "-id", f"@loader_path/{binary.name}", str(binary))
+
+    for binary in [*copied.values(), executable]:
+        run("codesign", "--force", "--sign", "-", "--timestamp=none", str(binary))
+    validate_macos_ffmpeg(executable)
+    return executable
+
+
+def validate_macos_ffmpeg(executable: Path) -> None:
+    binaries = [executable, *sorted((executable.parent / "lib").glob("*.dylib"))]
+    for binary in binaries:
+        for dependency in output("otool", "-L", str(binary)).splitlines()[1:]:
+            load_path = dependency.strip().split(" (compatibility version", 1)[0]
+            if load_path.startswith(("/usr/lib/", "/System/Library/", "@loader_path/")):
+                continue
+            raise RuntimeError(f"non-portable Mach-O dependency in {binary}: {load_path}")
+        run("codesign", "--verify", "--strict", str(binary))
+    run(str(executable), "-version")
+
+
 def assemble(ffmpeg: Path, explicit_name: str | None = None) -> tuple[Path, str]:
     name = target_name(explicit_name)
     source = DIST / "AnimeBox"
@@ -65,7 +142,10 @@ def assemble(ffmpeg: Path, explicit_name: str | None = None) -> tuple[Path, str]
     shutil.copy2(ROOT / "THIRD_PARTY.md", target / "THIRD_PARTY.md")
     shutil.copy2(RELEASE / "PORTABLE_README.txt", target / "README.txt")
     ffmpeg_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
-    shutil.copy2(ffmpeg, target / "tools" / ffmpeg_name)
+    if platform.system() == "Darwin":
+        bundle_macos_ffmpeg(ffmpeg, target / "tools")
+    else:
+        shutil.copy2(ffmpeg, target / "tools" / ffmpeg_name)
     if os.name != "nt":
         (target / "AnimeBox").chmod(0o755)
         (target / "tools" / ffmpeg_name).chmod(0o755)

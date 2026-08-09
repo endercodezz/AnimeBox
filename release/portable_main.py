@@ -14,6 +14,21 @@ from pathlib import Path
 import uvicorn
 
 
+BANNER = r"""
+                 _                  ____
+     /\         (_)                |  _ \
+    /  \   _ __  _ _ __ ___   ___  | |_) | _____  __
+   / /\ \ | '_ \| | '_ ` _ \ / _ \ |  _ < / _ \ \/ /
+  / ____ \| | | | | | | | | |  __/ | |_) | (_) >  <
+ /_/    \_\_| |_|_|_| |_| |_|\___| |____/ \___/_/\_\
+
+"""
+
+
+def print_banner() -> None:
+    print(BANNER, flush=True)
+
+
 def portable_root() -> Path:
     return Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 
@@ -63,6 +78,7 @@ def wait_and_open(url: str) -> None:
 
 
 def main() -> int:
+    print_banner()
     root = portable_root()
     ensure_runtime_files(root)
     os.chdir(root)

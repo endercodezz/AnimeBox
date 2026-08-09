@@ -112,6 +112,27 @@ jobs:
       - name: Build portable archive
         run: python release/build_portable.py --ffmpeg "${{ env.FFMPEG_PATH }}" --target-name "${{ matrix.target_name }}"
 
+      - name: Verify packaged ffmpeg
+        shell: bash
+        run: |
+          ffmpeg="release/artifacts/${{ matrix.target_name }}/tools/ffmpeg"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            ffmpeg="${ffmpeg}.exe"
+          fi
+          test -x "$ffmpeg" || [[ "${{ runner.os }}" == "Windows" ]]
+          "$ffmpeg" -version
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            while IFS= read -r binary; do
+              echo "Checking $binary"
+              otool -L "$binary"
+              if otool -L "$binary" | grep -E '/opt/homebrew|/usr/local/(Cellar|opt)'; then
+                echo "Packaged FFmpeg retains Homebrew load paths: $binary" >&2
+                exit 1
+              fi
+              codesign --verify --strict "$binary"
+            done < <(find "$(dirname "$ffmpeg")" -type f \( -name ffmpeg -o -name '*.dylib' \))
+          fi
+
       - name: Smoke test packaged server
         shell: bash
         run: |
