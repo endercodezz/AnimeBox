@@ -1,0 +1,13 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+sqlalchemy[asyncio]>=2.0.36
+aiosqlite>=0.20.0
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+httpx[brotli,http2,socks]>=0.28.1
+python-multipart>=0.0.17
+aiofiles>=24.1.0
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+# Local checkout of anicli-api (MIT) — see THIRD_PARTY.md
+-e ./.references/anicli-api
