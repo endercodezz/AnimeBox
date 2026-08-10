@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import stat
 
@@ -59,6 +60,7 @@ async def test_stream_download_lets_ffmpeg_pick_highest_quality(monkeypatch: pyt
     assert captured[captured.index("-c") + 1] == "copy"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not use POSIX execute bits")
 def test_bundled_ffmpeg_repairs_only_user_execute_bit(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
