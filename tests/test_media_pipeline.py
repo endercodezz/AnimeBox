@@ -79,11 +79,12 @@ def test_ffmpeg_from_path_is_not_modified(monkeypatch: pytest.MonkeyPatch, tmp_p
     executable = tmp_path / "system-ffmpeg"
     executable.write_bytes(b"ffmpeg")
     executable.chmod(0o755)
+    initial_mode = stat.S_IMODE(executable.stat().st_mode)
     monkeypatch.setattr(ffmpeg_tools, "ROOT_DIR", tmp_path / "portable")
     monkeypatch.setattr(ffmpeg_tools.shutil, "which", lambda _name: str(executable))
 
     assert ffmpeg_tools.ffmpeg_path() == str(executable)
-    assert stat.S_IMODE(executable.stat().st_mode) == 0o755
+    assert stat.S_IMODE(executable.stat().st_mode) == initial_mode
 
 
 @pytest.mark.asyncio
@@ -94,7 +95,8 @@ async def test_ffmpeg_launch_error_includes_path_and_macos_helper(
     executable.parent.mkdir()
     executable.write_bytes(b"ffmpeg")
     executable.chmod(0o755)
-    monkeypatch.setattr(ffmpeg_tools, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(ffmpeg_tools, "ffmpeg_path", lambda: str(executable))
+    monkeypatch.setattr(ffmpeg_tools, "bundled_ffmpeg_path", lambda: executable)
     monkeypatch.setattr(ffmpeg_tools.sys, "platform", "darwin")
 
     async def fail_to_start(*_args, **_kwargs):
