@@ -54,7 +54,19 @@ Portable-папка уже содержит базовый `.env`, `data/`, `lib
 - `data/` — база, история и прогресс;
 - `library/` — скачанные серии и постеры.
 
-На неподписанном macOS build при первом запуске может потребоваться **Control-click → Open**. Portable archive нужно полностью распаковать перед запуском.
+На неподписанном macOS build при первом запуске может потребоваться **Control-click → Open**. Portable archive нужно полностью распаковать перед запуском. Если при скачивании появляется `ffmpeg failed`, откройте Terminal в распакованной папке AnimeBox и выполните:
+
+```bash
+bash scripts/grant-macos-permissions.sh
+```
+
+Если Gatekeeper всё ещё блокирует FFmpeg и архив получен из доверенного источника, явно удалите quarantine только с файлов AnimeBox/FFmpeg:
+
+```bash
+bash scripts/grant-macos-permissions.sh --clear-quarantine
+```
+
+Опция не отключает Gatekeeper во всей системе и не изменяет посторонние файлы.
 
 ## Быстрый старт из исходников
 

@@ -133,6 +133,23 @@ jobs:
             done < <(find "$(dirname "$ffmpeg")" -type f \( -name ffmpeg -o -name '*.dylib' \))
           fi
 
+      - name: Verify macOS permission helper from archive
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          archive="release/artifacts/${{ matrix.target_name }}.zip"
+          extract_dir="$RUNNER_TEMP/animebox-permission-test"
+          rm -rf "$extract_dir"
+          mkdir -p "$extract_dir"
+          ditto -x -k "$archive" "$extract_dir"
+          portable="$extract_dir/${{ matrix.target_name }}"
+          test -f "$portable/scripts/grant-macos-permissions.sh"
+          chmod a-x "$portable/AnimeBox" "$portable/tools/ffmpeg"
+          bash "$portable/scripts/grant-macos-permissions.sh" "$portable"
+          test -x "$portable/AnimeBox"
+          test -x "$portable/tools/ffmpeg"
+          "$portable/tools/ffmpeg" -version
+
       - name: Smoke test packaged server
         shell: bash
         run: |

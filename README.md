@@ -54,7 +54,19 @@ When updating, preserve and move these items into the new portable folder:
 - `data/` — database, history, and progress;
 - `library/` — downloaded episodes and posters.
 
-An unsigned macOS build may require **Control-click → Open** on first launch. Fully extract the portable archive before running AnimeBox.
+An unsigned macOS build may require **Control-click → Open** on first launch. Fully extract the portable archive before running AnimeBox. If a download reports `ffmpeg failed`, open Terminal in the extracted AnimeBox folder and run:
+
+```bash
+bash scripts/grant-macos-permissions.sh
+```
+
+If Gatekeeper still blocks FFmpeg and the archive came from a source you trust, explicitly clear quarantine from AnimeBox/FFmpeg files:
+
+```bash
+bash scripts/grant-macos-permissions.sh --clear-quarantine
+```
+
+This option does not disable Gatekeeper system-wide and does not change unrelated files.
 
 ## Quick start from source
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import stat
 
 import pytest
 
@@ -56,6 +57,74 @@ async def test_stream_download_lets_ffmpeg_pick_highest_quality(monkeypatch: pyt
     assert "-map" not in captured
     assert captured[captured.index("-i") + 1] == "https://cdn.example/master.m3u8"
     assert captured[captured.index("-c") + 1] == "copy"
+
+
+def test_bundled_ffmpeg_repairs_only_user_execute_bit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    executable = tmp_path / "tools" / "ffmpeg"
+    executable.parent.mkdir()
+    executable.write_bytes(b"ffmpeg")
+    executable.chmod(0o640)
+    monkeypatch.setattr(ffmpeg_tools, "ROOT_DIR", tmp_path)
+
+    assert ffmpeg_tools.ffmpeg_path() == str(executable)
+    assert executable.stat().st_mode & stat.S_IXUSR
+    assert stat.S_IMODE(executable.stat().st_mode) == 0o740
+
+
+def test_ffmpeg_from_path_is_not_modified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    executable = tmp_path / "system-ffmpeg"
+    executable.write_bytes(b"ffmpeg")
+    executable.chmod(0o755)
+    monkeypatch.setattr(ffmpeg_tools, "ROOT_DIR", tmp_path / "portable")
+    monkeypatch.setattr(ffmpeg_tools.shutil, "which", lambda _name: str(executable))
+
+    assert ffmpeg_tools.ffmpeg_path() == str(executable)
+    assert stat.S_IMODE(executable.stat().st_mode) == 0o755
+
+
+@pytest.mark.asyncio
+async def test_ffmpeg_launch_error_includes_path_and_macos_helper(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    executable = tmp_path / "tools" / "ffmpeg"
+    executable.parent.mkdir()
+    executable.write_bytes(b"ffmpeg")
+    executable.chmod(0o755)
+    monkeypatch.setattr(ffmpeg_tools, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(ffmpeg_tools.sys, "platform", "darwin")
+
+    async def fail_to_start(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(ffmpeg_tools.asyncio, "create_subprocess_exec", fail_to_start)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await ffmpeg_tools.run_ffmpeg(["-version"])
+
+    message = str(exc_info.value)
+    assert str(executable) in message
+    assert "Permission denied" in message
+    assert "grant-macos-permissions.sh" in message
+
+
+@pytest.mark.asyncio
+async def test_ffmpeg_exit_error_includes_code_and_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeProcess:
+        returncode = 7
+
+        async def communicate(self):
+            return b"", b"broken dylib"
+
+    async def fake_create_subprocess_exec(*_args, **_kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(ffmpeg_tools, "ffmpeg_path", lambda: "/usr/local/bin/ffmpeg")
+    monkeypatch.setattr(ffmpeg_tools.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    with pytest.raises(RuntimeError, match="exit code 7.*broken dylib"):
+        await ffmpeg_tools.run_ffmpeg(["-version"])
 
 
 @pytest.mark.asyncio

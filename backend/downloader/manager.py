@@ -171,8 +171,6 @@ class DownloadManager:
             dest = library.episode_path(anime_title, season, episode, ext=ext)
 
             if stream.video.type in ("m3u8", "mpd"):
-                if not ffmpeg_tools.ffmpeg_available():
-                    raise RuntimeError("ffmpeg is required to download HLS/DASH streams")
                 tmp = await self._download_hls(
                     job_id,
                     stream.video.url,

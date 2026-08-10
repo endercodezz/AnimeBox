@@ -141,6 +141,10 @@ def assemble(ffmpeg: Path, explicit_name: str | None = None) -> tuple[Path, str]
     shutil.copy2(ROOT / ".env.example", target / ".env.example")
     shutil.copy2(ROOT / "THIRD_PARTY.md", target / "THIRD_PARTY.md")
     shutil.copy2(RELEASE / "PORTABLE_README.txt", target / "README.txt")
+    if platform.system() == "Darwin":
+        scripts_dir = target / "scripts"
+        scripts_dir.mkdir()
+        shutil.copy2(ROOT / "scripts" / "grant-macos-permissions.sh", scripts_dir)
     ffmpeg_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
     if platform.system() == "Darwin":
         bundle_macos_ffmpeg(ffmpeg, target / "tools")
@@ -149,6 +153,8 @@ def assemble(ffmpeg: Path, explicit_name: str | None = None) -> tuple[Path, str]
     if os.name != "nt":
         (target / "AnimeBox").chmod(0o755)
         (target / "tools" / ffmpeg_name).chmod(0o755)
+        if platform.system() == "Darwin":
+            (target / "scripts" / "grant-macos-permissions.sh").chmod(0o755)
     return target, name
 
 
