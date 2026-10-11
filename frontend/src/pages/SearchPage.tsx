@@ -1,156 +1,146 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { api } from '../api/client'
-import type { SearchResult, WatchHistory } from '../api/types'
-import heroArt from '../assets/hero.png'
-import { AnimeCard } from '../components/AnimeCard'
+import { useSearchParams } from 'react-router-dom'
+import { api, errorMessage } from '../api/client'
+import type { ProviderSearchStatus } from '../api/types'
+import { Icon } from '../components/icons'
+import { PosterCard, PosterGrid, PosterGridSkeleton } from '../components/PosterCard'
+import { Badge, ButtonLink, EmptyState, Notice, StatusDot } from '../components/ui'
+import { cx } from '../lib/cx'
+import { routes } from '../lib/routes'
+import { useResource } from '../lib/useResource'
+
+function ProviderStrip({ providers }: { providers: ProviderSearchStatus[] }) {
+  return (
+    <ul className="flex flex-wrap gap-2" aria-label="Ответы источников">
+      {providers.map((p) => (
+        <li
+          key={p.source}
+          title={p.error || undefined}
+          className={cx(
+            'tabular inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 text-[0.8rem]',
+            p.ok ? 'border-line bg-ink-2 text-fog' : 'border-danger/25 bg-danger/[0.06] text-danger',
+          )}
+        >
+          <span className={cx('size-1.5 rounded-full', p.ok ? (p.count ? 'bg-offline' : 'bg-dim') : 'bg-danger')} />
+          <span className="font-semibold text-paper/90">{p.label}</span>
+          {p.ok ? (
+            <span>
+              {p.count} · {((p.latency_ms ?? 0) / 1000).toFixed(1).replace('.', ',')} с
+            </span>
+          ) : (
+            <span>{p.timed_out ? 'не ответил вовремя' : 'ошибка'}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 export function SearchPage() {
-  const [q, setQ] = useState('')
-  const [source, setSource] = useState('')
-  const [sources, setSources] = useState<string[]>([])
-  const [results, setResults] = useState<SearchResult[]>([])
-  const [history, setHistory] = useState<WatchHistory[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [params, setParams] = useSearchParams()
+  const query = (params.get('q') || '').trim()
+  const source = params.get('source') || ''
+  const providers = useResource((signal) => api.providers().then((list) => (signal.aborted ? [] : list)), [])
+  const results = useResource((signal) => api.search(query, source || undefined, signal), [query, source], Boolean(query))
+  const enabled = (providers.data ?? []).filter((p) => p.enabled)
+  const data = results.data
+  const failed = data?.providers.filter((p) => !p.ok) ?? []
 
-  useEffect(() => {
-    api.sources().then((s) => setSources(s.map((x) => x.id))).catch(() => {})
-    api.history().then(setHistory).catch(() => {})
-  }, [])
-
-  async function onSearch(e: React.FormEvent) {
-    e.preventDefault()
-    if (!q.trim()) return
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await api.search(q.trim(), source || undefined)
-      setResults(data)
-      if (!data.length) setError('Ничего не найдено. Измените запрос или выберите другой источник.')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Поиск недоступен')
-      setResults([])
-    } finally {
-      setLoading(false)
-    }
+  function pickSource(next: string) {
+    const nextParams = new URLSearchParams(params)
+    if (next) nextParams.set('source', next)
+    else nextParams.delete('source')
+    setParams(nextParams, { replace: true })
   }
 
   return (
-    <div className="space-y-12">
-      <section className="projector-beam surface animate-rise relative isolate min-h-[390px] overflow-hidden rounded-[28px] px-5 py-8 sm:px-9 sm:py-10 lg:flex lg:min-h-[450px] lg:items-center lg:px-14">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_78%_40%,rgba(139,92,246,0.18),transparent_31%),linear-gradient(90deg,rgba(8,7,13,0.99)_0%,rgba(8,7,13,0.92)_46%,rgba(8,7,13,0.2)_100%)]" />
-        <img
-          src={heroArt}
-          alt=""
-          className="pointer-events-none absolute -right-10 bottom-6 -z-10 w-[310px] rotate-3 opacity-25 drop-shadow-[0_35px_80px_rgba(139,92,246,0.45)] sm:right-2 sm:w-[390px] sm:opacity-45 lg:right-[5%] lg:w-[470px] lg:opacity-75"
-        />
-
-        <div className="relative z-10 max-w-3xl space-y-6">
-          <div className="space-y-3">
-            <p className="eyebrow">Личная коллекция · без облака</p>
-            <h1 className="max-w-2xl font-display text-4xl font-extrabold leading-[0.98] tracking-[-0.055em] sm:text-6xl lg:text-7xl">
-              Ваше аниме.
-              <span className="block bg-gradient-to-r from-violet-soft to-[#d8c7ff] bg-clip-text text-transparent">
-                Всегда рядом.
-              </span>
-            </h1>
-            <p className="max-w-xl text-sm leading-6 text-fog sm:text-base">
-              Найдите тайтл, выберите озвучку и сохраните серии на устройство. В дороге интернет не понадобится.
-            </p>
-          </div>
-
-          <form onSubmit={onSearch} className="surface flex max-w-3xl flex-col gap-2 rounded-2xl p-2 sm:flex-row">
-            <label className="flex min-w-0 flex-1 items-center gap-3 px-3">
-              <span className="text-lg text-violet-soft" aria-hidden="true">⌕</span>
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Название аниме"
-                className="min-w-0 flex-1 bg-transparent py-3 text-base text-paper outline-none placeholder:text-fog/45"
-                autoFocus
-                aria-label="Название аниме"
-              />
-            </label>
-            <select
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              className="rounded-xl border border-white/8 bg-ink-3 px-3 py-3 text-sm font-semibold text-paper sm:max-w-40"
-              aria-label="Источник"
-            >
-              <option value="">Все источники</option>
-              {sources.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <button type="submit" disabled={loading} className="btn-primary min-w-28">
-              {loading ? 'Ищем…' : 'Найти'}
-            </button>
-          </form>
-          {error && <p className="rounded-xl border border-danger/20 bg-danger/8 px-4 py-3 text-sm text-danger">{error}</p>}
-
-          <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs font-semibold uppercase tracking-[0.12em] text-fog/65">
-            <span>◉ Локальный просмотр</span><span>↓ Загрузка сезонов</span><span>⌁ 8 источников</span>
-          </div>
+    <div className="page space-y-7">
+      <header className="flex flex-col gap-4">
+        <div>
+          <h1 className="display text-[1.7rem] font-semibold sm:text-[2rem]">{query ? `«${query}»` : 'Поиск'}</h1>
+          {!query && <p className="mt-2 text-fog">Введите название в строке поиска вверху. Ищем сразу во всех включённых источниках.</p>}
         </div>
-      </section>
-
-      {results.length > 0 && (
-        <section className="animate-rise space-y-5">
-          <div className="flex items-end justify-between gap-4">
-            <div><p className="eyebrow">Каталог</p><h2 className="section-title">Результаты поиска</h2></div>
-            <span className="text-sm text-fog">Найдено: {results.length}</span>
-          </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
-            {results.map((item) => (
-              <AnimeCard key={item.id} id={item.id} title={item.title} poster={item.poster} year={item.year} source={item.source} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {!results.length && history.length > 0 && (
-        <section className="space-y-5">
-          <div className="flex items-end justify-between gap-4">
-            <div><p className="eyebrow">С этого места</p><h2 className="section-title">Продолжить просмотр</h2></div>
-            <Link to="/library" className="text-sm font-bold text-violet-soft hover:text-paper">Вся библиотека →</Link>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {history.slice(0, 6).map((h) => {
-              const pct = h.duration_seconds ? Math.min(100, Math.round((h.progress_seconds / h.duration_seconds) * 100)) : 0
-              return (
-                <Link
-                  key={h.id}
-                  to={`/player/${encodeURIComponent(h.anime_external_id)}?episode=${h.episode}&season=${h.season}${h.local_episode_id ? `&local=${h.local_episode_id}` : ''}`}
-                  className="surface group flex gap-4 rounded-2xl p-3 transition hover:border-amber/40 hover:bg-ink-3/80"
-                >
-                  <div className="h-24 w-17 shrink-0 overflow-hidden rounded-xl bg-ink-4">
-                    {h.poster ? <img src={h.poster} alt="" className="h-full w-full object-cover transition group-hover:scale-105" /> : <div className="h-full bg-amber/10" />}
-                  </div>
-                  <div className="flex min-w-0 flex-1 flex-col justify-center gap-2">
-                    <div><p className="truncate font-display font-bold">{h.anime_title}</p><p className="mt-1 text-xs font-semibold uppercase tracking-wider text-fog">Сезон {h.season} · Серия {h.episode}</p></div>
-                    <div className="h-1 overflow-hidden rounded-full bg-white/8"><div className="h-full bg-amber" style={{ width: `${pct}%` }} /></div>
-                  </div>
-                  <span className="self-center text-violet-soft transition group-hover:translate-x-1">▶</span>
-                </Link>
-              )
-            })}
-          </div>
-        </section>
-      )}
-
-      {!results.length && !history.length && !loading && (
-        <section className="grid gap-4 md:grid-cols-3">
-          {[
-            ['01', 'Найдите тайтл', 'Ищите сразу по нескольким открытым источникам.'],
-            ['02', 'Выберите озвучку', 'AnimeBox запомнит ваши приоритеты.'],
-            ['03', 'Возьмите с собой', 'Скачайте серии и смотрите полностью офлайн.'],
-          ].map(([number, title, text]) => (
-            <div key={number} className="surface rounded-2xl p-5">
-              <span className="font-display text-sm font-extrabold text-amber">{number}</span>
-              <h2 className="mt-5 font-display text-lg font-bold">{title}</h2>
-              <p className="mt-2 text-sm leading-6 text-fog">{text}</p>
-            </div>
+        <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0" role="radiogroup" aria-label="Источник">
+          {[{ id: '', label: 'Все включённые', status: null as null | (typeof enabled)[number]['status'] }, ...enabled.map((p) => ({ id: p.id, label: p.label, status: p.status }))].map((option) => (
+            <button
+              key={option.id || 'all'}
+              type="button"
+              role="radio"
+              aria-checked={source === option.id}
+              onClick={() => pickSource(option.id)}
+              className={cx(
+                'inline-flex h-9 shrink-0 items-center gap-2 rounded-full border px-3.5 text-[0.85rem] font-semibold transition-colors',
+                source === option.id ? 'border-violet/60 bg-violet/16 text-paper' : 'border-line text-fog hover:border-white/15 hover:text-paper',
+              )}
+            >
+              {option.status && <StatusDot status={option.status} />}
+              {option.label}
+            </button>
           ))}
-        </section>
+        </div>
+      </header>
+
+      {!query && (
+        <EmptyState icon="search" title="Начните с названия">
+          Поиск работает по русским и английским названиям. Нажмите <kbd className="rounded border border-line px-1">/</kbd>, чтобы перейти к строке поиска.
+        </EmptyState>
+      )}
+
+      {query && results.loading && (
+        <div aria-busy="true">
+          <p className="mb-5 flex items-center gap-2 text-[0.9rem] text-fog">
+            <Icon name="pulse" size={16} className="text-violet-text" /> Опрашиваем источники…
+          </p>
+          <PosterGridSkeleton />
+        </div>
+      )}
+
+      {query && results.error && !results.loading ? (
+        <Notice title="Поиск не выполнен" action={<button type="button" className="font-bold" onClick={results.reload}>Повторить</button>}>
+          {errorMessage(results.error)}
+        </Notice>
+      ) : null}
+
+      {data && !results.loading && (
+        <>
+          <ProviderStrip providers={data.providers} />
+          {failed.length > 0 && data.results.length > 0 && (
+            <p className="text-[0.85rem] text-fog">
+              {failed.map((p) => p.label).join(', ')} сейчас не ответил{failed.length > 1 ? 'и' : ''} — показаны результаты остальных источников.
+            </p>
+          )}
+          {data.results.length > 0 ? (
+            <PosterGrid className="enter">
+              {data.results.map((item) => (
+                <PosterCard
+                  key={item.id}
+                  to={routes.anime(item.id)}
+                  title={item.title}
+                  poster={item.poster}
+                  meta={item.year ? `${item.year}` : undefined}
+                  badge={<Badge className="bg-black/65 text-white/85 backdrop-blur">{item.source_label || item.source}</Badge>}
+                />
+              ))}
+            </PosterGrid>
+          ) : failed.length === data.providers.length ? (
+            <EmptyState
+              icon="alert"
+              title="Источники не ответили"
+              action={
+                <>
+                  <ButtonLink to={routes.settings('providers')} icon="settings">
+                    Проверить источники
+                  </ButtonLink>
+                </>
+              }
+            >
+              Возможно, нет подключения к интернету или сайты недоступны из вашей сети. Скачанные серии по-прежнему доступны в библиотеке.
+            </EmptyState>
+          ) : (
+            <EmptyState icon="search" title="Ничего не найдено">
+              Попробуйте другое написание или оригинальное название. {source && 'Можно также искать во всех источниках сразу.'}
+            </EmptyState>
+          )}
+        </>
       )}
     </div>
   )
