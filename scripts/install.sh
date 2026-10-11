@@ -17,15 +17,8 @@ echo "Root: $ROOT"
 echo "Python: $(python3 --version)"
 echo "Node:   $(node --version)"
 
-ANICLI="$ROOT/.references/anicli-api"
-if [[ ! -f "$ANICLI/pyproject.toml" ]]; then
-  echo "==> Cloning anicli-api (MIT)"
-  mkdir -p "$ROOT/.references"
-  git clone --depth 1 https://github.com/vypivshiy/anicli-api "$ANICLI" || { echo "Failed to clone anicli-api. Check internet and retry." >&2; exit 1; }
-else
-  echo "==> anicli-api checkout: OK"
-fi
-python3 "$ROOT/scripts/patch_anicli.py"
+echo "==> anicli-api (MIT), pinned commit from patches/anicli-api.ref"
+python3 "$ROOT/scripts/patch_anicli.py" --checkout || { echo "Failed to prepare anicli-api. Check internet and retry." >&2; exit 1; }
 
 PYTHON="$ROOT/.venv/bin/python"
 if [[ ! -x "$PYTHON" ]] || ! "$PYTHON" -c 'import sys' >/dev/null 2>&1; then

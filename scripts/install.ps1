@@ -33,17 +33,9 @@ if ($LASTEXITCODE -ne 0) { throw "Python 3.12+ required. Found: $(& python --ver
 Write-Host "Python: $(& python --version 2>&1)"
 Write-Host "Node:   $(& node --version 2>&1)"
 
-$Anicli = Join-Path $Root ".references\anicli-api"
-if (-not (Test-Path "$Anicli\pyproject.toml")) {
-  Write-Host "==> Cloning anicli-api (MIT)"
-  New-Item -ItemType Directory -Force (Split-Path $Anicli) | Out-Null
-  & git clone --depth 1 https://github.com/vypivshiy/anicli-api $Anicli
-  if ($LASTEXITCODE -ne 0) { throw "Failed to clone anicli-api. Check internet access and retry." }
-} else {
-  Write-Host "==> anicli-api checkout: OK"
-}
-& python "$Root\scripts\patch_anicli.py"
-if ($LASTEXITCODE -ne 0) { throw "Failed to apply AnimeBox compatibility patch to anicli-api." }
+Write-Host "==> anicli-api (MIT), pinned commit from patches\anicli-api.ref"
+& python "$Root\scripts\patch_anicli.py" --checkout
+if ($LASTEXITCODE -ne 0) { throw "Failed to prepare anicli-api (clone or compatibility patch). Check internet access and retry." }
 
 $python = Join-Path $Root ".venv\Scripts\python.exe"
 $venvValid = (Test-Path $python)

@@ -28,21 +28,32 @@ def output(*args: str) -> str:
     return subprocess.run(args, check=True, capture_output=True, text=True).stdout
 
 
-def target_name(explicit: str | None = None) -> str:
-    if explicit:
-        if Path(explicit).name != explicit or explicit in {".", ".."} or not explicit.startswith("AnimeBox-"):
-            raise ValueError("target name must be an AnimeBox-* directory name without path separators")
-        return explicit
+def app_version() -> str:
+    namespace: dict[str, str] = {}
+    exec((ROOT / "backend" / "__init__.py").read_text(encoding="utf-8"), namespace)
+    return namespace["__version__"]
+
+
+def platform_label() -> str:
     system = platform.system()
     machine = platform.machine().lower()
     arch = "arm64" if machine in {"arm64", "aarch64"} else "x64"
     if system == "Windows":
-        return "AnimeBox-Windows-x64"
+        return "Windows-x64"
     if system == "Darwin":
-        return f"AnimeBox-macOS-{arch}"
+        return f"macOS-{arch}"
     if system == "Linux":
-        return f"AnimeBox-Linux-{arch}"
+        return f"Linux-{arch}"
     raise RuntimeError(f"Unsupported platform: {system} {machine}")
+
+
+def target_name(explicit: str | None = None, version: str | None = None) -> str:
+    """``AnimeBox-<version>-<Platform>-<arch>``, e.g. ``AnimeBox-2.0.0-Windows-x64``."""
+    if explicit:
+        if Path(explicit).name != explicit or explicit in {".", ".."} or not explicit.startswith("AnimeBox-"):
+            raise ValueError("target name must be an AnimeBox-* directory name without path separators")
+        return explicit
+    return f"AnimeBox-{version or app_version()}-{platform_label()}"
 
 
 def find_ffmpeg(explicit: str | None) -> Path:
@@ -127,8 +138,32 @@ def validate_macos_ffmpeg(executable: Path) -> None:
     run(str(executable), "-version")
 
 
-def assemble(ffmpeg: Path, explicit_name: str | None = None) -> tuple[Path, str]:
-    name = target_name(explicit_name)
+def copy_ffmpeg_license(ffmpeg: Path, tools: Path) -> None:
+    """Ship FFmpeg's license next to the binary (GPL/LGPL redistribution requirement)."""
+    real = ffmpeg.resolve()  # Homebrew exposes a symlink into the Cellar
+    for parent in (real.parent, real.parent.parent, real.parent.parent / "share" / "doc" / "ffmpeg"):
+        for candidate in ("LICENSE.txt", "LICENSE.md", "LICENSE", "COPYING.GPLv3", "COPYING.GPLv2", "COPYING.LGPLv2.1"):
+            if (parent / candidate).is_file():
+                shutil.copy2(parent / candidate, tools / f"FFMPEG-{candidate.replace('.txt', '')}.txt")
+                break
+    try:
+        version_line = output(str(ffmpeg), "-version").splitlines()[0]
+    except (OSError, subprocess.CalledProcessError, IndexError):
+        version_line = "unknown"
+    notice = [
+        "This folder contains an unmodified FFmpeg binary (https://ffmpeg.org/).",
+        "FFmpeg is licensed under the LGPL-2.1-or-later or GPL-2.0-or-later depending on build options;",
+        "the builds bundled with AnimeBox are GPL builds.",
+        "Windows/Linux builds: https://github.com/BtbN/FFmpeg-Builds (source and build scripts are published there).",
+        "macOS builds: Homebrew formula 'ffmpeg' (https://formulae.brew.sh/formula/ffmpeg).",
+        "FFmpeg source code: https://ffmpeg.org/download.html#get-sources",
+        f"Bundled binary version: {version_line}",
+    ]
+    (tools / "FFMPEG-NOTICE.txt").write_text("\n".join(notice) + "\n", encoding="utf-8")
+
+
+def assemble(ffmpeg: Path, explicit_name: str | None = None, version: str | None = None) -> tuple[Path, str]:
+    name = target_name(explicit_name, version)
     source = DIST / "AnimeBox"
     target = ARTIFACTS / name
     if target.exists():
@@ -140,6 +175,9 @@ def assemble(ffmpeg: Path, explicit_name: str | None = None) -> tuple[Path, str]
     shutil.copy2(ROOT / ".env.example", target / ".env")
     shutil.copy2(ROOT / ".env.example", target / ".env.example")
     shutil.copy2(ROOT / "THIRD_PARTY.md", target / "THIRD_PARTY.md")
+    shutil.copy2(ROOT / "LICENSE", target / "LICENSE.txt")
+    if (ROOT / "CHANGELOG.md").is_file():
+        shutil.copy2(ROOT / "CHANGELOG.md", target / "CHANGELOG.md")
     shutil.copy2(RELEASE / "PORTABLE_README.txt", target / "README.txt")
     if platform.system() == "Darwin":
         scripts_dir = target / "scripts"
@@ -150,6 +188,7 @@ def assemble(ffmpeg: Path, explicit_name: str | None = None) -> tuple[Path, str]
         bundle_macos_ffmpeg(ffmpeg, target / "tools")
     else:
         shutil.copy2(ffmpeg, target / "tools" / ffmpeg_name)
+    copy_ffmpeg_license(ffmpeg, target / "tools")
     if os.name != "nt":
         (target / "AnimeBox").chmod(0o755)
         (target / "tools" / ffmpeg_name).chmod(0o755)
@@ -176,7 +215,8 @@ def archive(target: Path, name: str) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build native AnimeBox portable archive")
     parser.add_argument("--ffmpeg", help="Path to native ffmpeg executable")
-    parser.add_argument("--target-name", help="Override artifact name, for example AnimeBox-SteamDeck-x64")
+    parser.add_argument("--target-name", help="Override artifact name, for example AnimeBox-2.0.0-Linux-x64")
+    parser.add_argument("--version", help="Version for the artifact name (default: backend.__version__)")
     parser.add_argument("--skip-frontend", action="store_true")
     parser.add_argument("--skip-tests", action="store_true")
     args = parser.parse_args()
@@ -185,6 +225,7 @@ def main() -> int:
     if not args.skip_frontend:
         npm = "npm.cmd" if os.name == "nt" else "npm"
         run(npm, "ci", cwd=ROOT / "frontend")
+        run(npm, "run", "check", cwd=ROOT / "frontend")
         run(npm, "run", "build", cwd=ROOT / "frontend")
     if not args.skip_tests:
         run(sys.executable, "-m", "pytest", "-q")
@@ -203,9 +244,12 @@ def main() -> int:
         str(DIST),
         str(RELEASE / "animebox.spec"),
     )
-    target, name = assemble(ffmpeg, args.target_name)
-    output = archive(target, name)
-    print(f"Portable artifact: {output}")
+    version = args.version or app_version()
+    if version != app_version():
+        raise SystemExit(f"Requested version {version} does not match backend.__version__ {app_version()}")
+    target, name = assemble(ffmpeg, args.target_name, version)
+    result = archive(target, name)
+    print(f"Portable artifact: {result}")
     return 0
 
 

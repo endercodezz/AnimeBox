@@ -2,231 +2,217 @@
 
 **English** | [Русский](README.ru.md)
 
-A local anime library for searching, watching, and traveling without internet access. AnimeBox runs on your computer, stores episodes as regular files, and requires no account or cloud service.
+A local anime library for Russian-language anime sites. Search, pick a voiceover, watch in the browser, or download
+episodes and watch them later without internet. AnimeBox runs on your computer, stores episodes as regular files, and
+needs no account or cloud service.
 
-> **Status:** early MVP. Many bugs remain, and active development is ongoing. Source websites can change without notice, so individual providers may temporarily stop working.
+> Source websites change without notice. AnimeGO is the recommended and best-tested source; others are marked
+> experimental. AnimeBox shows each source's real status in **Settings → Sources**.
 
 ## Features
 
-| Feature | Status |
+| | |
 |---|---|
-| Search across multiple sources | ✅ |
-| Title details, episodes, and voiceovers | ✅ |
-| Online HLS playback through a local proxy | ✅ |
-| Episode or season downloads | 🟨 |
-| Download queue, progress, cancellation, and retry | ✅ |
-| Local library and offline player | ✅ |
-| Saved watch progress | ✅ |
-| Steam Deck optimization | ✅ |
+| Search | Several sources in parallel; a slow or broken source never blocks the others, and each source's result is shown |
+| Title page | Description, episodes, voiceovers with their players, progress and offline status per episode |
+| Watching | Built-in player with progress saving/restore, keyboard shortcuts, quality, speed, voiceover switching, audio tracks and subtitles when the stream provides them, automatic next episode |
+| Reliability | If one player of a voiceover fails (e.g. CVH), the next one is tried (Kodik, Aniboom, …); expired streams are re-resolved without losing your position |
+| Downloads | Episode or whole season, parallel queue, real progress and speed, retries, cancel; pause/resume for direct MP4 files |
+| Library | Only episodes that really exist on disk; storage usage, sorting, filtering, deletion, rescan |
+| Offline | Downloaded episodes, posters and progress work without internet, even when the source is down |
+| Steam Deck | Linux build runs on SteamOS; optional H.265 transcoding to save space |
 
-## Interface
+### Sources
 
-AnimeBox uses a dark cinematic interface with a violet accent. After launch, open `http://127.0.0.1:8787`. On a title page, choose a **Season voiceover**; it applies to playback and downloads for every episode. You can still open a specific episode's voiceover list and set an override for that episode. **Auto-select** follows the voiceover priority from Settings and uses the first available option when no preferred voiceover is present.
+| Source | Status | Notes |
+|---|---|---|
+| AnimeGO | **Stable**, default | Many voiceovers; several players per voiceover with automatic fallback |
+| AniLiberty (AniLibria) | Experimental | Own voiceover only |
+| AnimeVost | Experimental | Own voiceover only; direct MP4 (downloads can be paused) |
+| Yummy Anime | Experimental | Some players are DASH-only: downloadable, not playable in the browser |
+| AniLib, DreamCast, SameBand | Experimental, off by default | Small or region-dependent catalogs |
 
-> **Download recommendation:** the author recommends choosing **AnimeGO** whenever it is available because it currently works best and provides the most stable downloads.
+HDRezka is not offered: its extractor relies on working around an anti-bot check. AnimeBox does not bypass CAPTCHAs
+or other access restrictions.
 
-The **Shut down** button in the header stops the local server cleanly and releases port `8787`. Closing the browser tab alone does not stop the server, protecting active downloads from accidental interruption.
+## Install (portable, recommended)
 
-## How the portable build works
+Download the archive for your system from [GitHub Releases](https://github.com/endercodezz/AnimeBox/releases).
+Python, Node.js and FFmpeg are bundled — nothing else to install.
 
-The archive does not contain two separate applications. `AnimeBox.exe`/`AnimeBox` is one Python launcher with a FastAPI backend and embedded static files from the prebuilt React/TypeScript frontend. Node.js is not included in the archive and does not run on the user's device; the browser receives regular HTML/CSS/JavaScript files from the local backend.
-
-The `.references/` directory contains local checkouts of upstream open-source projects and is not committed to Git. Installation scripts and CI clone `anicli-api`, then apply the tracked compatibility patch from `patches/`. Required compatibility changes therefore do not remain hidden inside a fully ignored checkout.
-
-## Portable releases
-
-For most users, the recommended option is to download the archive for their platform from GitHub Releases. Python, Node.js, Git, and a system FFmpeg installation are not required: the Python runtime, backend, compiled frontend, `anicli-api`, and FFmpeg are included.
-
-AnimeBox remains a web application: the launcher starts a private server at `http://127.0.0.1:8787` and opens the system browser. No separate desktop interface is installed.
-
-| Archive | How to run |
+| Archive | Run |
 |---|---|
-| `AnimeBox-Windows-x64.zip` | extract the archive and open `AnimeBox.exe` |
-| `AnimeBox-Linux-x64.tar.gz` | Linux x86_64, including Steam Deck/SteamOS; extract, then run `chmod +x AnimeBox && ./AnimeBox` |
-| `AnimeBox-macOS-x64.zip` | Intel Mac; extract and open the launcher |
-| `AnimeBox-macOS-arm64.zip` | Apple Silicon; extract and open the launcher |
+| `AnimeBox-<version>-Windows-x64.zip` | Extract, open `AnimeBox.exe` |
+| `AnimeBox-<version>-Linux-x64.tar.gz` | Linux x86_64 and Steam Deck: extract, then `./AnimeBox` |
+| `AnimeBox-<version>-macOS-x64.zip` | Intel Mac: extract, open `AnimeBox` |
+| `AnimeBox-<version>-macOS-arm64.zip` | Apple Silicon: extract, open `AnimeBox` |
 
-The portable folder already contains a base `.env`, `data/`, `library/`, bundled FFmpeg, and all runtime dependencies. Windows and Linux/Steam Deck archives use GPL FFmpeg builds from BtbN; macOS archives bundle FFmpeg with its relocated Homebrew libraries, so Homebrew is not required on the user's Mac. Internet access is required only for search, fetching new streams, and downloads. The downloaded library, local posters, MP4 files, and watch progress work offline; no external web fonts are used.
+AnimeBox starts a private server on `http://127.0.0.1:8787` and opens your browser. Closing the tab does not stop it —
+use **Stop** in the sidebar so active downloads are not interrupted by accident.
 
-When updating, preserve and move these items into the new portable folder:
+Verify a download with the published checksums: `sha256sum -c SHA256SUMS.txt --ignore-missing`.
 
-- `.env` — settings;
-- `data/` — database, history, and progress;
+**macOS:** unsigned builds may need **Control-click → Open** on first launch. If downloads report `ffmpeg failed`, run
+`bash scripts/grant-macos-permissions.sh` in the AnimeBox folder (add `--clear-quarantine` only for archives from a
+source you trust).
+
+## Upgrading from 1.x
+
+Your data lives in three places; nothing else needs to be kept:
+
+- `.env` — settings (1.x files work unchanged),
+- `data/` — database (history, progress, download history, settings),
 - `library/` — downloaded episodes and posters.
 
-An unsigned macOS build may require **Control-click → Open** on first launch. Fully extract the portable archive before running AnimeBox. If a download reports `ffmpeg failed`, open Terminal in the extracted AnimeBox folder and run:
+**Portable:** extract the new version, then copy those three items from the old folder into the new one (replace the
+empty ones). **From source:** `git pull`, then run the install script again.
 
-```bash
-bash scripts/grant-macos-permissions.sh
-```
+On the first start AnimeBox 2.0:
 
-If Gatekeeper still blocks FFmpeg and the archive came from a source you trust, explicitly clear quarantine from AnimeBox/FFmpeg files:
+1. copies the database to `data/backups/animebox-v0-<date>.db`;
+2. merges duplicate entries created by the 1.x id bug, keeping the best progress;
+3. converts stored paths to library-relative ones;
+4. stops counting merely-browsed titles as library content (no files are deleted);
+5. removes empty folders and abandoned `*.part.*` files left in `library/` by 1.x.
 
-```bash
-bash scripts/grant-macos-permissions.sh --clear-quarantine
-```
+If anything goes wrong, the migration is rolled back and the backup stays in `data/backups/`. Files referenced by the
+database but missing on disk are hidden from the library; **Library → Rescan** removes those records and picks up
+episodes that AnimeBox downloaded earlier but no longer tracks.
 
-This option does not disable Gatekeeper system-wide and does not change unrelated files.
+## Run from source
 
-## Quick start from source
-
-Running from source requires Python 3.12+, Node.js 20+ with npm, Git, and FFmpeg in `PATH`. Docker is not required. The installation script downloads the official `anicli-api` repository (MIT) into `.references/anicli-api`; the other reference projects are needed only for development.
-
-### Windows 11
+Requires Python 3.12+, Node.js 20+, Git, and FFmpeg in `PATH`. Docker is not used. The install script fetches a pinned,
+tested commit of [anicli-api](https://github.com/vypivshiy/anicli-api) into `.references/anicli-api` and applies the
+compatibility patch from `patches/`.
 
 ```powershell
+# Windows
 git clone https://github.com/endercodezz/AnimeBox.git
 cd AnimeBox
 .\scripts\install.ps1
 .\scripts\run.ps1
 ```
 
-Double-click launch is also available: run `scripts\install.cmd`, then `scripts\run.cmd`. For diagnostics, use `scripts\check.cmd`.
-
-The first `install` or `run` creates a base `.env` from `.env.example`. An existing `.env` is never overwritten.
-
-### macOS / Linux / Steam Deck
-
 ```bash
+# macOS / Linux / Steam Deck
 git clone https://github.com/endercodezz/AnimeBox.git
 cd AnimeBox
-chmod +x scripts/*.sh
 ./scripts/install.sh
 ./scripts/run.sh
 ```
 
-### Development mode
-
-```powershell
-# Windows
-.\scripts\run.ps1 -Dev
-```
-
-```bash
-# macOS / Linux
-./scripts/run.sh --dev
-```
-
-- Production UI + API: `http://127.0.0.1:8787`
-- Vite UI in development mode: `http://127.0.0.1:5173`
-- OpenAPI: `http://127.0.0.1:8787/docs`
-
-`run` builds the frontend, starts the API, waits for a successful health check, and only then opens the browser. Use `--skip-build` / `-SkipBuild` to keep the existing frontend build and `--no-browser` / `-NoBrowser` to avoid opening the browser.
-
-Check the installation without starting a download:
-
-```powershell
-.\scripts\check.ps1
-```
-
-```bash
-./scripts/check.sh
-```
+`scripts\install.cmd`, `scripts\run.cmd` and `scripts\check.cmd` allow double-click launch on Windows.
+Development mode with hot reload: `run.ps1 -Dev` / `run.sh --dev` (UI on `http://127.0.0.1:5173`, API docs on
+`http://127.0.0.1:8787/docs`).
 
 ## Configuration
 
-On first launch, `.env.example` is copied to `.env`. Main options:
+`.env` is created from `.env.example` on first run and never overwritten. Most options are also in **Settings**
+(UI values take precedence). Notable options:
 
-- `LIBRARY_PATH` — downloaded episode directory;
-- `DATABASE_URL` — SQLite URL;
-- `HTTP_PROXY` — optional HTTP/SOCKS proxy for restricted sources;
-- `PROVIDER_SEARCH_TIMEOUT` — maximum wait for each search provider, `10` seconds by default; slow or blocked providers are skipped while results from available providers are returned;
-- `PREFERRED_VOICEOVERS` — comma-separated voiceover priority for automatic selection;
-- `DEFAULT_QUALITY` — preferred quality;
-- `STEAM_DECK_CRF`, `STEAM_DECK_HEIGHT` — transcoding settings.
+| Option | Meaning |
+|---|---|
+| `LIBRARY_PATH`, `DATA_PATH` | Where episodes and the database live (relative to the AnimeBox folder) |
+| `HTTP_PROXY` | HTTP or SOCKS proxy used for search, playback **and** downloads |
+| `PROVIDER_SEARCH_TIMEOUT`, `PROVIDER_DETAIL_TIMEOUT`, `PROVIDER_STREAM_TIMEOUT` | Per-stage time limits per source |
+| `PREFERRED_VOICEOVERS` | Voiceover priority for automatic selection |
+| `DEFAULT_QUALITY` | 360, 480, 720 or 1080 — closest available quality not above it |
+| `MAX_CONCURRENT_DOWNLOADS` | Parallel downloads (1–6) |
+| `ALLOWED_HOSTS` | Extra host names accepted besides `127.0.0.1`/`localhost` |
 
-Most user-facing options are also available on the **Settings** page.
+## Keyboard shortcuts (player)
 
-## Data storage
+| Key | Action |
+|---|---|
+| Space / K | Play / pause |
+| ← / → | −5 s / +5 s |
+| J / L | −10 s / +10 s |
+| ↑ / ↓ | Volume |
+| M | Mute |
+| F | Fullscreen |
+| Shift+N / Shift+P | Next / previous episode |
+| < / > | Slower / faster |
+| 0–9 | Jump to 0–90 % |
+| / or Ctrl+K | Focus search (outside the player) |
+
+## Data layout
 
 ```text
 library/
 └── Anime Name/
     ├── poster.jpg
-    ├── metadata.json
+    ├── metadata.json          # includes the AnimeBox id, used by Rescan
     └── Season 1/
         ├── Episode 01.mp4
         └── Episode 02.mp4
-
 data/
-├── animebox.db
+├── animebox.db                # SQLite (history, progress, queue, settings)
+├── backups/                   # automatic backups before schema upgrades
+├── provider_health.json
 └── search_cache/
 ```
-
-`library/`, the database, cache, and `.env` are excluded from Git.
 
 ## Architecture
 
 ```text
 backend/
-├── api/          # FastAPI endpoints
-├── providers/    # adapters over anicli-api
-├── downloader/   # durable SQLite queue and ffmpeg downloads
-├── player/       # HLS/media reverse proxy
-├── services/     # library, settings, ffmpeg helpers
-├── database/     # async SQLAlchemy + SQLite
-├── models/       # persistence models
-└── schemas/      # Pydantic API contracts
-
+├── api/          # FastAPI routers: catalog, downloads, library, history, system
+├── providers/    # provider engine over anicli-api: registry, players, health, cache, HTTP sessions
+├── player/       # media sessions + HLS-rewriting media proxy
+├── downloader/   # durable queue, concurrency, validation, atomic finalisation
+├── services/     # library files/index, settings, ffmpeg
+├── database/     # async SQLAlchemy + versioned migrations
+├── models/  schemas/
 frontend/src/
-├── api/          # typed API client
-├── components/   # shared UI
-└── pages/        # search, library, anime, player, downloads, settings
+├── api/  lib/  components/  pages/  pages/player/
 ```
 
-Backend: Python, FastAPI, async SQLAlchemy, SQLite, Pydantic, and httpx. Frontend: React, TypeScript, Tailwind CSS, Vite, and hls.js.
+Backend: Python, FastAPI, async SQLAlchemy, SQLite, Pydantic, httpx. Frontend: React, TypeScript, Tailwind CSS, Vite,
+hls.js.
 
-## Verification
+## Development checks
 
 ```bash
-# Backend
-.venv/Scripts/python.exe -m pytest -q          # Windows
-.venv/bin/python -m pytest -q                  # macOS/Linux
-
-# Frontend
-cd frontend
-npm run lint
+python -m pytest -q             # backend (use the .venv interpreter)
+cd frontend && npm run check    # type-check, lint, unit tests
 npm run build
 ```
 
-For a runtime check, start AnimeBox, search for a title, choose a season voiceover, open an episode, download it, and then play it from **Library**.
+Manual tests against real sources: [docs/TESTING.md](docs/TESTING.md). Releases: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Troubleshooting
 
-### `venv not found`
+**A stream does not open.** The player tries every player of the chosen voiceover and shows which ones failed. Pick
+another voiceover, or check **Settings → Sources → Check** to see which stage fails (search, title, episodes,
+voiceovers, stream).
 
-Run `scripts/install.ps1` or `scripts/install.sh`. If the environment was moved between directories or computers, delete `.venv` and install again.
+**A source shows "not responding".** The site may be unreachable from your network or may have changed. Results from
+other sources are still shown. If a source works only through a proxy, set it in **Settings → Network** — it is then
+used for search, playback and downloads alike (some video hosts tie links to your IP address).
 
-### Search works, but the stream does not open
+**"Title data is outdated".** The source no longer recognises the stored link; search for the title again.
 
-- try another voiceover or source;
-- check whether the source website is available in your region;
-- configure `HTTP_PROXY` in `.env` or the interface;
-- inspect backend messages in the terminal.
+**Downloads fail with an ffmpeg error.** From source: install FFmpeg and check `ffmpeg -version`. Portable builds
+include FFmpeg; **Settings → Diagnostics** shows which binary is used.
 
-### `Search cache expired`
+**The library shows fewer episodes than before.** Episodes whose files were deleted or moved are hidden. Use
+**Library → Rescan**.
 
-Search for the title again and open it from the new results. AnimeBox does not permanently store links to source pages.
-
-### Downloads require FFmpeg
-
-When running from source, install FFmpeg and confirm that `ffmpeg -version` works in a new terminal. HLS/DASH downloads and Steam Deck optimization are unavailable without FFmpeg. Portable archives already include FFmpeg.
-
-### A source suddenly stopped working
-
-The provider may have changed its HTML/API or may be unavailable through your internet provider. AnimeBox waits no longer than `PROVIDER_SEARCH_TIMEOUT` for each source and returns results from available providers. If only one domain fails, the portable build is not necessarily broken—it may be a routing issue or source-specific block. Configure an HTTP/SOCKS proxy in Settings when needed. Do not edit `.references/anicli-api` manually: recreate the checkout with the installation script and keep compatibility changes in `patches/`.
+**Logs.** Portable builds write `data/animebox.log`; from source, logs go to the terminal. Proxy passwords and signed
+link tokens are redacted.
 
 ## Legal notice
 
-AnimeBox is a local client and does not host media content. Use it only with content and sources permitted by applicable law and service terms. The user is responsible for choosing sources and saving files.
+AnimeBox is a local client and does not host any media. Use it only with sources and content permitted by applicable
+law and the sources' terms. You are responsible for the sources you choose and the files you save.
 
 ## Credits
 
-AnimeBox uses or studies work from:
+AnimeBox uses and is inspired by:
 
-- [anicli-api](https://github.com/vypivshiy/anicli-api) — catalog, episode, voiceover, and stream extraction;
-- [ani-cli-ru](https://github.com/vypivshiy/ani-cli-ru) — UX and reverse-proxy approach;
-- [HakuNeko](https://github.com/manga-download/hakuneko) — connector and downloader architecture;
-- [Sonarr](https://github.com/Sonarr/Sonarr) — ideas for durable queues, imports, and media libraries.
+- [anicli-api](https://github.com/vypivshiy/anicli-api) — search, titles, episodes, voiceovers and stream extraction;
+- [ani-cli-ru](https://github.com/vypivshiy/ani-cli-ru) — interaction flow and the HLS reverse-proxy approach;
+- [HakuNeko](https://github.com/manga-download/hakuneko) — connector registry and download manager architecture;
+- [Sonarr](https://github.com/Sonarr/Sonarr) — durable queues, failed-download handling and library lifecycle ideas.
 
-Detailed licenses and reuse boundaries: [THIRD_PARTY.md](THIRD_PARTY.md).
+With gratitude to the authors of the original projects. Licenses and reuse details: [THIRD_PARTY.md](THIRD_PARTY.md).

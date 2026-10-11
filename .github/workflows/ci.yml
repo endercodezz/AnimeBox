@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+    outputs:
+      version:
+        description: AnimeBox version from backend/__init__.py
+        value: ${{ jobs.checks.outputs.version }}
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(python -c "import re,pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('backend/__init__.py').read_text()).group(1))")
+          frontend=$(node -p "require('./frontend/package.json').version")
+          if [ "$version" != "$frontend" ]; then
+            echo "backend version $version != frontend/package.json $frontend" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch pinned anicli-api and apply compatibility patch
+        run: python scripts/patch_anicli.py --checkout
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Backend tests
+        run: python -m pytest -q
+
+      - name: Frontend install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend type-check, lint and tests
+        working-directory: frontend
+        run: npm run check
+
+      - name: Frontend production build
+        working-directory: frontend
+        run: npm run build
+
+      - name: No agent or temporary files are tracked
+        run: |
+          if git ls-files | grep -E '^(\.tmp|\.claude|\.codex|\.cursor)/'; then
+            echo "Local agent/workspace files must not be committed" >&2
+            exit 1
+          fi
