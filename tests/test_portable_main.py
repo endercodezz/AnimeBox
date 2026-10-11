@@ -58,3 +58,28 @@ def test_main_prepares_root_before_importing_app(monkeypatch, tmp_path: Path) ->
     assert captured["cwd"] == root
     assert captured["data_exists"] is True
     assert captured["library_exists"] is True
+
+
+def test_file_logging_is_written_even_after_backend_configured_console(tmp_path: Path) -> None:
+    import logging
+
+    from backend.main import configure_logging
+
+    configure_logging()  # backend import already installed console handlers in 1.x, silencing basicConfig
+    log_path = tmp_path / "animebox.log"
+    before = list(logging.getLogger().handlers)
+    portable_main.setup_file_logging(log_path)
+    try:
+        logging.getLogger("animebox.test").warning("proxy http://user:secret@proxy.example:8080 failed")
+        configure_logging()
+        logging.getLogger("animebox.test").warning("proxy http://user:secret@proxy.example:8080 failed")
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        text = log_path.read_text(encoding="utf-8")
+        assert "failed" in text
+        assert text.strip().splitlines()[-1].count("secret") == 0  # redaction applies to the file handler
+    finally:
+        for handler in list(logging.getLogger().handlers):
+            if handler not in before:
+                logging.getLogger().removeHandler(handler)
+                handler.close()

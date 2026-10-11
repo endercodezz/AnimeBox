@@ -1,36 +1,73 @@
 name: Portable release
 
+# Tags vX.Y.Z publish a release; vX.Y.Z-suffix (e.g. v2.0.0-beta.1) publish a prerelease.
+# Manual runs (workflow_dispatch) build and test every platform and upload workflow artifacts only.
 on:
   workflow_dispatch:
   push:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  meta:
+    needs: checks
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - id: meta
+        env:
+          CODE_VERSION: ${{ needs.checks.outputs.version }}
+        run: |
+          version="$CODE_VERSION"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/v}"
+            if [[ "$tag" != "$version" ]]; then
+              echo "Tag v$tag does not match backend.__version__ $version" >&2
+              exit 1
+            fi
+          fi
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "Version $version is not semver" >&2
+            exit 1
+          fi
+          prerelease=false
+          [[ "$version" == *-* ]] && prerelease=true
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: meta
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
-            name: Windows-x64
+            platform: Windows-x64
             ffmpeg_url: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip
-            target_name: AnimeBox-Windows-x64
-          - os: ubuntu-latest
-            name: Linux-x64
+          - os: ubuntu-22.04 # older glibc keeps the Linux build compatible with SteamOS and most distributions
+            platform: Linux-x64
             ffmpeg_url: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
-            target_name: AnimeBox-Linux-x64
           - os: macos-15-intel
-            name: macOS-x64
+            platform: macOS-x64
             ffmpeg_url: system
-            target_name: AnimeBox-macOS-x64
           - os: macos-14
-            name: macOS-arm64
+            platform: macOS-arm64
             ffmpeg_url: system
-            target_name: AnimeBox-macOS-arm64
     runs-on: ${{ matrix.os }}
+    env:
+      TARGET_NAME: AnimeBox-${{ needs.meta.outputs.version }}-${{ matrix.platform }}
+      VERSION: ${{ needs.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -39,15 +76,12 @@ jobs:
           cache: pip
       - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Checkout anicli-api
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/vypivshiy/anicli-api .references/anicli-api
-          python scripts/patch_anicli.py
+      - name: Fetch pinned anicli-api and apply compatibility patch
+        run: python scripts/patch_anicli.py --checkout
 
       - name: Install Python dependencies
         run: python -m pip install -r backend/requirements.txt -r release/requirements-build.txt
@@ -77,24 +111,12 @@ jobs:
             '--retry', '5', '--retry-delay', '5', '--retry-all-errors',
             '--connect-timeout', '30', '--max-time', '600'
           )
-
           & curl.exe @curlArgs --output ffmpeg.zip $url
           if ($LASTEXITCODE -ne 0) { throw "ffmpeg download failed with curl exit code ${LASTEXITCODE}: $url" }
-
           $archive = Get-Item ffmpeg.zip -ErrorAction Stop
           if ($archive.Length -le 0) { throw 'downloaded ffmpeg archive is empty' }
           $actual = (Get-FileHash ffmpeg.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Host "ffmpeg archive: $($archive.Length) bytes, SHA-256 $actual"
-
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [System.IO.Compression.ZipFile]::OpenRead($archive.FullName)
-          try {
-            $ffmpegEntry = $zip.Entries | Where-Object { $_.FullName -match '(^|/)bin/ffmpeg\.exe$' } | Select-Object -First 1
-            if (-not $ffmpegEntry) { throw 'ffmpeg archive does not contain bin/ffmpeg.exe' }
-          } finally {
-            $zip.Dispose()
-          }
-
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-package
           $ffmpeg = Get-ChildItem ffmpeg-package -Recurse -File -Filter ffmpeg.exe |
             Where-Object { $_.FullName -match '[\\/]bin[\\/]ffmpeg\.exe$' } |
@@ -110,12 +132,18 @@ jobs:
         run: echo "FFMPEG_PATH=$(command -v ffmpeg)" >> "$GITHUB_ENV"
 
       - name: Build portable archive
-        run: python release/build_portable.py --ffmpeg "${{ env.FFMPEG_PATH }}" --target-name "${{ matrix.target_name }}"
+        run: python release/build_portable.py --ffmpeg "${{ env.FFMPEG_PATH }}" --version "${{ env.VERSION }}" --target-name "${{ env.TARGET_NAME }}"
+
+      - name: Verify archive contents and checksum
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Linux" ]]; then ext=tar.gz; else ext=zip; fi
+          python release/verify_archive.py "release/artifacts/$TARGET_NAME.$ext" --version "$VERSION"
 
       - name: Verify packaged ffmpeg
         shell: bash
         run: |
-          ffmpeg="release/artifacts/${{ matrix.target_name }}/tools/ffmpeg"
+          ffmpeg="release/artifacts/$TARGET_NAME/tools/ffmpeg"
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             ffmpeg="${ffmpeg}.exe"
           fi
@@ -137,12 +165,12 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          archive="release/artifacts/${{ matrix.target_name }}.zip"
+          archive="release/artifacts/$TARGET_NAME.zip"
           extract_dir="$RUNNER_TEMP/animebox-permission-test"
           rm -rf "$extract_dir"
           mkdir -p "$extract_dir"
           ditto -x -k "$archive" "$extract_dir"
-          portable="$extract_dir/${{ matrix.target_name }}"
+          portable="$extract_dir/$TARGET_NAME"
           test -f "$portable/scripts/grant-macos-permissions.sh"
           chmod a-x "$portable/AnimeBox" "$portable/tools/ffmpeg"
           bash "$portable/scripts/grant-macos-permissions.sh" "$portable"
@@ -150,78 +178,101 @@ jobs:
           test -x "$portable/tools/ffmpeg"
           "$portable/tools/ffmpeg" -version
 
-      - name: Smoke test packaged server
+      - name: Smoke test packaged app
         shell: bash
+        env:
+          ANIMEBOX_NO_BROWSER: '1'
         run: |
           python - <<'PY'
-          import os, pathlib, platform, subprocess, time, urllib.request
-          artifacts = pathlib.Path('release/artifacts')
-          folder = next(p for p in artifacts.iterdir() if p.is_dir() and p.name.startswith('AnimeBox-'))
+          import json, os, pathlib, platform, socket, subprocess, time, urllib.error, urllib.request
+          name = os.environ['TARGET_NAME']
+          version = os.environ['VERSION']
+          folder = pathlib.Path('release/artifacts') / name
           exe = (folder / ('AnimeBox.exe' if platform.system() == 'Windows' else 'AnimeBox')).resolve()
-          env = dict(os.environ)
-          env['PATH'] = str((folder / 'tools').resolve()) + os.pathsep + env.get('PATH', '')
           launch_cwd = pathlib.Path('release/smoke-cwd').resolve()
           launch_cwd.mkdir(parents=True, exist_ok=True)
-          proc = subprocess.Popen(
-              [str(exe)],
-              cwd=str(launch_cwd),
-              env=env,
-              stdout=subprocess.PIPE,
-              stderr=subprocess.STDOUT,
-              text=True,
-          )
+          base = 'http://127.0.0.1:8787'
+
+          def get(path, timeout=10, headers=None):
+              request = urllib.request.Request(base + path, headers=headers or {})
+              with urllib.request.urlopen(request, timeout=timeout) as response:
+                  return response.status, response.read()
+
+          proc = subprocess.Popen([str(exe)], cwd=str(launch_cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
           try:
-              for _ in range(120):
+              for _ in range(160):
                   if proc.poll() is not None:
-                      output = proc.stdout.read() if proc.stdout else ''
-                      raise SystemExit(f'portable app exited with {proc.returncode}:\n{output}')
+                      raise SystemExit(f'portable app exited with {proc.returncode}:\n{proc.stdout.read()}')
                   try:
-                      with urllib.request.urlopen('http://127.0.0.1:8787/api/health', timeout=1) as response:
-                          if response.status == 200:
-                              print('portable health: OK')
-                              break
+                      status, body = get('/api/health', timeout=1)
+                      if status == 200:
+                          break
                   except OSError:
-                      time.sleep(.25)
+                      time.sleep(0.25)
               else:
-                  output = proc.stdout.read() if proc.poll() is not None and proc.stdout else ''
-                  raise SystemExit(f'portable app failed health check:\n{output}')
+                  raise SystemExit('portable app failed health check')
+              health = json.loads(body)
+              assert health['version'] == version, health
+              status, html = get('/')
+              assert status == 200 and b'<div id="root">' in html, 'bundled UI missing'
+              status, body = get('/api/providers')
+              assert status == 200 and json.loads(body)[0]['id'] == 'animego'
+              status, body = get('/api/library')
+              assert status == 200 and json.loads(body) == [], 'fresh install must have an empty library'
+              status, body = get('/api/home')
+              assert status == 200
+              diagnostics = json.loads(get('/api/diagnostics')[1])
+              assert diagnostics['ffmpeg']['path'], 'bundled ffmpeg not detected'
+              try:
+                  get('/api/health', headers={'Host': 'attacker.example'})
+                  raise SystemExit('foreign Host header was accepted')
+              except urllib.error.HTTPError as exc:
+                  assert exc.code == 400
               if not (folder / 'data' / 'animebox.db').is_file():
-                  raise SystemExit('portable database was not created inside package data directory')
-              with urllib.request.urlopen('http://127.0.0.1:8787/api/sources', timeout=10) as response:
-                  if response.status != 200:
-                      raise SystemExit(f'portable sources check returned HTTP {response.status}')
-              with urllib.request.urlopen('http://127.0.0.1:8787/api/search?q=k-on&source=animego', timeout=30) as response:
-                  if response.status != 200:
-                      raise SystemExit(f'portable search check returned HTTP {response.status}')
+                  raise SystemExit('database was not created inside the portable data directory')
               if (launch_cwd / 'data').exists() or (launch_cwd / 'library').exists():
-                  raise SystemExit('portable runtime files leaked into launch working directory')
-              with urllib.request.urlopen('http://127.0.0.1:8787/api/session', timeout=5) as response:
-                  token = __import__('json').load(response)['shutdown_token']
-              request = urllib.request.Request(
-                  'http://127.0.0.1:8787/api/shutdown',
-                  method='POST',
-                  headers={'X-AnimeBox-Token': token},
-              )
+                  raise SystemExit('runtime files leaked into the launch working directory')
+              token = json.loads(get('/api/session')[1])['shutdown_token']
+              request = urllib.request.Request(base + '/api/shutdown', method='POST', headers={'X-AnimeBox-Token': token})
               with urllib.request.urlopen(request, timeout=5) as response:
-                  if response.status != 200:
-                      raise SystemExit(f'portable shutdown returned HTTP {response.status}')
-              proc.wait(timeout=15)
+                  assert response.status == 200
+              proc.wait(timeout=20)
               if proc.returncode != 0:
-                  output = proc.stdout.read() if proc.stdout else ''
-                  raise SystemExit(f'portable shutdown exited with {proc.returncode}:\n{output}')
-              with __import__('socket').socket() as sock:
+                  raise SystemExit(f'portable shutdown exited with {proc.returncode}:\n{proc.stdout.read()}')
+              with socket.socket() as sock:
                   if sock.connect_ex(('127.0.0.1', 8787)) == 0:
                       raise SystemExit('portable shutdown did not release port 8787')
+              if (folder / 'data' / 'animebox.db-wal').exists():
+                  raise SystemExit('database WAL was not checkpointed on shutdown')
+              print('portable smoke test: OK')
           finally:
               if proc.poll() is None:
                   proc.terminate()
-                  try: proc.wait(timeout=10)
-                  except subprocess.TimeoutExpired: proc.kill()
+                  try:
+                      proc.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      proc.kill()
+          PY
+
+      - name: Live provider check (informational)
+        continue-on-error: true
+        shell: bash
+        run: |
+          python - <<'PY'
+          import asyncio
+          from backend.providers.registry import ProviderRegistry
+          async def main():
+              registry = ProviderRegistry()
+              await registry.check('animego')
+              for stage, result in registry.health.get('animego').stages.items():
+                  print(f"{stage:10} {'ok' if result.ok else 'FAIL'} {result.latency_ms} ms {result.error or ''}")
+              await registry.aclose()
+          asyncio.run(main())
           PY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AnimeBox-${{ matrix.name }}
+          name: ${{ env.TARGET_NAME }}
           path: |
             release/artifacts/*.zip
             release/artifacts/*.tar.gz
@@ -230,23 +281,44 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [meta, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - uses: actions/checkout@v5
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
-      - name: Build checksum manifest
-        shell: bash
+
+      - name: Verify all platform archives and build checksum manifest
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
           cd artifacts
-          sha256sum *.zip *.tar.gz 2>/dev/null > SHA256SUMS.txt
+          expected="AnimeBox-$VERSION-Windows-x64.zip AnimeBox-$VERSION-Linux-x64.tar.gz AnimeBox-$VERSION-macOS-x64.zip AnimeBox-$VERSION-macOS-arm64.zip"
+          for file in $expected; do
+            test -s "$file" || { echo "missing $file — refusing to publish an incomplete release" >&2; exit 1; }
+          done
+          for file in *.sha256; do sha256sum -c "$file"; done
+          sha256sum $expected > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          python ../release/verify_archive.py $expected --version "$VERSION"
+
+      - name: Release notes
+        run: python release/release_notes.py "${{ needs.meta.outputs.version }}" > release-notes.md
+
       - uses: softprops/action-gh-release@v2
         with:
+          name: AnimeBox ${{ needs.meta.outputs.version }}
+          body_path: release-notes.md
+          generate_release_notes: true
+          prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
           files: |
             artifacts/*.zip
             artifacts/*.tar.gz
             artifacts/*.sha256
             artifacts/SHA256SUMS.txt
-          generate_release_notes: true

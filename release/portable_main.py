@@ -65,6 +65,8 @@ def port_available(port: int) -> bool:
 
 
 def wait_and_open(url: str) -> None:
+    if os.environ.get("ANIMEBOX_NO_BROWSER"):
+        return
     health = f"{url}/api/health"
     for _ in range(120):
         try:
@@ -77,37 +79,45 @@ def wait_and_open(url: str) -> None:
     logging.error("AnimeBox did not become ready at %s", url)
 
 
+def setup_file_logging(log_path: Path) -> None:
+    """Add a file handler; backend.main has already configured console logging."""
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    root = logging.getLogger()
+    root.addHandler(handler)
+    if root.level > logging.INFO or root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
+
+
 def main() -> int:
     print_banner()
     root = portable_root()
     ensure_runtime_files(root)
     os.chdir(root)
 
-    from backend.main import app, enable_shutdown, wait_for_shutdown
+    from backend import __version__
+    from backend.main import app, configure_logging, enable_shutdown, wait_for_shutdown
 
     enable_shutdown()
+    setup_file_logging(root / "data" / "animebox.log")
+    configure_logging()  # attaches secret redaction to the new file handler too
 
-    log_path = root / "data" / "animebox.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[logging.StreamHandler(), logging.FileHandler(log_path, encoding="utf-8")],
-    )
     port = configured_port(root)
+    url = f"http://127.0.0.1:{port}"
     if not port_available(port):
-        url = f"http://127.0.0.1:{port}"
         try:
             with urllib.request.urlopen(f"{url}/api/health", timeout=2) as response:
                 if response.status == 200:
-                    webbrowser.open(url)
+                    logging.info("AnimeBox is already running at %s; opening it", url)
+                    if not os.environ.get("ANIMEBOX_NO_BROWSER"):
+                        webbrowser.open(url)
                     return 0
         except OSError:
             pass
-        logging.error("Port %s is already used. Change PORT in .env.", port)
+        logging.error("Port %s is already used by another program. Change PORT in .env.", port)
         return 1
 
-    url = f"http://127.0.0.1:{port}"
-    logging.info("Starting AnimeBox at %s", url)
+    logging.info("Starting AnimeBox %s at %s", __version__, url)
     threading.Thread(target=wait_and_open, args=(url,), daemon=True).start()
 
     async def serve() -> None:

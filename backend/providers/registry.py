@@ -1,33 +1,62 @@
-"""Provider layer — thin adapters over anicli-api (MIT).
+"""Provider registry — orchestrates anicli-api (MIT) extractors.
 
-Inspired by Hakuneko connector registry and ani-cli-ru extractor loading.
+Inspired by HakuNeko's connector registry and ani-cli-ru's source selection flow.
+
+Pipeline per title: search -> details -> episodes -> voiceovers (players) -> stream.
+Each stage has its own timeout, records provider health, and raises a typed
+:mod:`backend.providers.errors` exception. A failing provider never blocks the
+others: search fans out concurrently and reports per-provider status.
 """
 
 from __future__ import annotations
 
 import asyncio
 import importlib
-import json
 import logging
 import re
 import time
-from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
+from collections import OrderedDict
+from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import urlsplit
 
-from anicli_api._http import HTTPAsync, HTTPSync
-from anicli_api.tools.helpers import get_video_by_quality
-
-from backend.config import ROOT_DIR, Settings, get_settings
-from backend.schemas import AnimeDetail, EpisodeInfo, SearchResult, VideoStream, VoiceoverOption
+from backend.config import Settings, get_settings
+from backend.providers import players
+from backend.providers.cache import CachedSearch, SearchCache, TTLCache
+from backend.providers.catalog import DEFAULT_SOURCE, SOURCE_BY_ID, SOURCES, SourceSpec, default_enabled_sources
+from backend.providers.errors import (
+    CacheExpired,
+    NotFound,
+    ProviderError,
+    ProviderTimeout,
+    ProviderUnavailable,
+    StreamUnavailable,
+)
+from backend.providers.health import HealthTracker
+from backend.providers.http import DEFAULT_USER_AGENT, SourceClients
+from backend.providers.ids import decode_external_id, encode_external_id
+from backend.schemas import (
+    AnimeDetail,
+    EpisodeInfo,
+    ProviderSearchStatus,
+    SearchResponse,
+    SearchResult,
+    VoiceoverOption,
+)
 
 logger = logging.getLogger("animebox.providers")
 
-DEFAULT_SOURCES = ("animego", "anilibria", "animevost", "yummy_anime")
-CACHE_TTL = 12 * 3600
-CACHE_DIR = ROOT_DIR / "data" / "search_cache"
+DETAIL_TTL = 15 * 60
+SOURCES_TTL = 10 * 60
+MAX_AUTO_VOICEOVER_GROUPS = 4
+
+
+@dataclass
+class ResolvedVideo:
+    type: str
+    quality: int
+    url: str
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -35,377 +64,453 @@ class ResolvedStream:
     anime_title: str
     episode: int
     voiceover: str
-    video: VideoStream
-    source_url: str
+    player: str
+    video: ResolvedVideo
+    qualities: list[int]
+    browser_playable: bool
+    source: str
 
 
 @dataclass
-class CachedSearch:
-    source: str
-    url: str
+class VoiceoverGroup:
     title: str
-    thumbnail: str
-    payload: dict[str, Any]
-    saved_at: float
+    players: list[players.PlayerSource]
 
 
-def encode_external_id(source: str, key: str) -> str:
-    return f"{source}:{quote(key, safe='')}"
-
-
-def decode_external_id(external_id: str) -> tuple[str, str]:
-    source, _, rest = external_id.partition(":")
-    if not source or not rest:
-        raise ValueError(f"Invalid anime id: {external_id}")
-    return source, unquote(rest)
-
-
-def _stable_key(source: str, item: Any) -> str:
+def _stable_key(item: Any) -> str:
+    """Key scheme kept identical to 1.x so existing ids keep resolving."""
     url = getattr(item, "url", "") or ""
     data = getattr(item, "data", None)
     if url and url != "_":
         return url
     if isinstance(data, dict):
-        for k in ("id", "slug_url", "slug", "anime_id"):
-            if data.get(k) is not None:
-                return f"id:{data[k]}"
+        for key in ("id", "slug_url", "slug", "anime_id"):
+            if data.get(key) is not None:
+                return f"id:{data[key]}"
     return f"title:{getattr(item, 'title', 'unknown')}"
 
 
-def _payload_from_item(item: Any) -> dict[str, Any]:
+def _payload(item: Any) -> dict[str, Any]:
     data = getattr(item, "data", None)
     if isinstance(data, dict):
         return data
     raw = getattr(item, "raw_json", None)
-    if isinstance(raw, dict):
-        return {"raw_json": raw}
-    return {}
+    return {"raw_json": raw} if isinstance(raw, dict) else {}
 
 
-@lru_cache(maxsize=1)
-def list_source_modules() -> list[str]:
-    import anicli_api.source as pkg
+def _year(anime: Any) -> int | None:
+    def from_value(value: Any) -> int | None:
+        if isinstance(value, int) and 1900 < value < 2100:
+            return value
+        if isinstance(value, str):
+            match = re.search(r"(19|20)\d{2}", value)
+            return int(match.group(0)) if match else None
+        if isinstance(value, dict) and "year" in value:
+            return from_value(value["year"])
+        return None
 
-    path = Path(pkg.__path__[0])
-    return sorted(p.stem for p in path.glob("*.py") if not p.name.startswith("_"))
-
-
-def _http_clients(settings: Settings):
-    kwargs: dict[str, Any] = {}
-    if settings.http_proxy:
-        kwargs["proxy"] = settings.http_proxy
-    return HTTPSync(**kwargs) if kwargs else HTTPSync(), HTTPAsync(**kwargs) if kwargs else HTTPAsync()
-
-
-def load_extractor(source_name: str, settings: Settings | None = None):
-    settings = settings or get_settings()
-    module_name = source_name.replace("-", "_")
-    module = importlib.import_module(f"anicli_api.source.{module_name}")
-    sync_http, async_http = _http_clients(settings)
-    return module.Extractor(http_client=sync_http, http_async_client=async_http), module
-
-
-def _guess_year(anime: Any) -> int | None:
-    raw = getattr(anime, "raw_json", None) or {}
-    if isinstance(raw, dict):
-        for key in ("datePublished", "year", "aired_on"):
-            val = raw.get(key)
-            if isinstance(val, str):
-                m = re.search(r"(19|20)\d{2}", val)
-                if m:
-                    return int(m.group(0))
-            if isinstance(val, int) and 1900 < val < 2100:
-                return val
-    data = getattr(anime, "data", None)
-    if isinstance(data, dict):
-        for key in ("year", "season", "aired_on", "releaseDate"):
-            val = data.get(key)
-            if isinstance(val, int) and 1900 < val < 2100:
-                return val
-            if isinstance(val, str):
-                m = re.search(r"(19|20)\d{2}", val)
-                if m:
-                    return int(m.group(0))
-            if isinstance(val, dict) and "year" in val:
-                try:
-                    return int(val["year"])
-                except (TypeError, ValueError):
-                    pass
+    for container, keys in (
+        (getattr(anime, "raw_json", None), ("datePublished", "year", "aired_on")),
+        (getattr(anime, "data", None), ("year", "season", "aired_on", "releaseDate")),
+    ):
+        if isinstance(container, dict):
+            for key in keys:
+                found = from_value(container.get(key))
+                if found:
+                    return found
     return None
 
 
-def _player_host(url: str) -> str | None:
+def _ordinal(value: Any) -> int | None:
     try:
-        return urlparse(url).netloc or None
-    except Exception:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
         return None
 
 
-def _pick_video(videos: list[Any], quality: int) -> Any:
-    """Pick closest quality, preferring HLS over DASH for browser compatibility."""
-    closest = get_video_by_quality(videos, quality)
-    same_quality = [video for video in videos if int(video.quality) == int(closest.quality)]
-    format_priority = {"m3u8": 0, "mp4": 1, "webm": 2, "mpd": 3}
-    return min(same_quality, key=lambda video: format_priority.get(video.type, 99))
+def _short_error(exc: BaseException) -> str:
+    text = str(exc).strip() or type(exc).__name__
+    return text.splitlines()[0][:300]
 
 
-class SearchCache:
-    def __init__(self) -> None:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        self._mem: dict[str, CachedSearch] = {}
+class AnicliProvider:
+    """Adapter for one anicli-api source module, with its own HTTP session."""
 
-    def _path(self, external_id: str) -> Path:
-        safe = re.sub(r"[^\w.-]+", "_", external_id)[:180]
-        return CACHE_DIR / f"{safe}.json"
+    def __init__(self, spec: SourceSpec, proxy: str | None) -> None:
+        self.spec = spec
+        self.clients = SourceClients(proxy)
+        self._module: Any = None
 
-    def put(self, external_id: str, entry: CachedSearch) -> None:
-        self._mem[external_id] = entry
-        try:
-            self._path(external_id).write_text(
-                json.dumps(
-                    {
-                        "source": entry.source,
-                        "url": entry.url,
-                        "title": entry.title,
-                        "thumbnail": entry.thumbnail,
-                        "payload": entry.payload,
-                        "saved_at": entry.saved_at,
-                    },
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
-        except Exception as exc:
-            logger.debug("Failed to persist search cache: %s", exc)
+    @property
+    def module(self) -> Any:
+        if self._module is None:
+            try:
+                self._module = importlib.import_module(f"anicli_api.source.{self.spec.module}")
+            except Exception as exc:  # noqa: BLE001 - surface as provider failure
+                raise ProviderUnavailable(f"{self.spec.label} failed to load: {exc}", source=self.spec.id) from exc
+        return self._module
 
-    def get(self, external_id: str) -> CachedSearch | None:
-        now = time.time()
-        entry = self._mem.get(external_id)
-        if entry and now - entry.saved_at <= CACHE_TTL:
-            return entry
-        path = self._path(external_id)
-        if not path.exists():
-            return None
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            entry = CachedSearch(
-                source=raw["source"],
-                url=raw["url"],
-                title=raw["title"],
-                thumbnail=raw.get("thumbnail") or "",
-                payload=raw.get("payload") or {},
-                saved_at=float(raw.get("saved_at") or 0),
-            )
-            if now - entry.saved_at > CACHE_TTL:
-                return None
-            self._mem[external_id] = entry
-            return entry
-        except Exception:
-            return None
+    def extractor(self) -> Any:
+        return self.module.Extractor(http_client=self.clients.sync, http_async_client=self.clients.async_)
+
+    def build_search(self, entry: CachedSearch) -> Any:
+        search_cls = self.module.Search
+        kwargs: dict[str, Any] = {
+            "title": entry.title,
+            "thumbnail": entry.thumbnail,
+            "url": entry.url,
+            "http": self.clients.sync,
+            "http_async": self.clients.async_,
+        }
+        fields = {a.name for a in getattr(search_cls, "__attrs_attrs__", ())}
+        if "data" in fields:
+            if not entry.payload:
+                raise CacheExpired("Search data expired; search again", source=self.spec.id, stage="details")
+            kwargs["data"] = entry.payload
+        return search_cls(**kwargs)
+
+    async def aclose(self) -> None:
+        await self.clients.aclose()
 
 
 class ProviderRegistry:
-    """Hakuneko-inspired registry wrapping anicli-api extractors."""
-
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, *, health: HealthTracker | None = None) -> None:
         self.settings = settings or get_settings()
-        self.cache = SearchCache()
+        self.cache = SearchCache(self.settings.data_path / "search_cache")
+        self.health = health or HealthTracker(self.settings.data_path / "provider_health.json")
+        self.enabled_sources: list[str] = default_enabled_sources()
+        self.default_source: str = DEFAULT_SOURCE
+        self._providers: dict[str, AnicliProvider] = {}
+        self._anime_cache: TTLCache[Any] = TTLCache(DETAIL_TTL)
+        self._episodes_cache: TTLCache[list[Any]] = TTLCache(DETAIL_TTL)
+        self._sources_cache: TTLCache[list[players.PlayerSource]] = TTLCache(SOURCES_TTL, max_items=512)
+        self._title_hints: dict[str, str] = {}
 
-    def available_sources(self) -> list[str]:
-        modules = set(list_source_modules())
-        ordered = [s for s in DEFAULT_SOURCES if s in modules]
-        ordered.extend(sorted(modules - set(ordered)))
-        return ordered
+    # ------------------------------------------------------------------ setup
+    @property
+    def proxy(self) -> str | None:
+        return self.settings.http_proxy or None
 
-    async def search(self, query: str, sources: list[str] | None = None) -> list[SearchResult]:
-        sources = sources or list(DEFAULT_SOURCES)
-        batches = await asyncio.gather(
-            *[
-                asyncio.wait_for(
-                    self._search_one(source, query),
-                    timeout=self.settings.provider_search_timeout,
+    def provider(self, source: str) -> AnicliProvider:
+        spec = SOURCE_BY_ID.get(source)
+        if spec is None:
+            raise ProviderUnavailable(f"Unknown source '{source}'", source=source)
+        provider = self._providers.get(source)
+        if provider is None:
+            provider = AnicliProvider(spec, self.proxy)
+            self._providers[source] = provider
+        return provider
+
+    async def apply_network_settings(self) -> None:
+        """Recreate sessions after the proxy changed (cached objects hold old clients)."""
+        old, self._providers = self._providers, {}
+        self._anime_cache.clear()
+        self._episodes_cache.clear()
+        self._sources_cache.clear()
+        for provider in old.values():
+            await provider.aclose()
+
+    def configure(self, *, enabled_sources: list[str] | None = None, default_source: str | None = None) -> None:
+        if enabled_sources is not None:
+            self.enabled_sources = [s for s in enabled_sources if s in SOURCE_BY_ID] or [DEFAULT_SOURCE]
+        if default_source and default_source in SOURCE_BY_ID:
+            self.default_source = default_source
+
+    def ordered_sources(self) -> list[SourceSpec]:
+        enabled = set(self.enabled_sources)
+        return sorted(SOURCES, key=lambda s: (s.id != self.default_source, s.id not in enabled, not s.stable))
+
+    def remember_title(self, external_id: str, title: str | None) -> None:
+        if title:
+            self._title_hints[external_id] = title
+
+    async def aclose(self) -> None:
+        for provider in self._providers.values():
+            await provider.aclose()
+        self._providers = {}
+
+    # ----------------------------------------------------------------- stages
+    async def _stage(self, source: str, stage: str, coro, timeout: float):
+        started = time.monotonic()
+        try:
+            result = await asyncio.wait_for(coro, timeout=timeout)
+        except TimeoutError as exc:
+            self.health.record(source, stage, False, int(timeout * 1000), f"timed out after {timeout:.0f}s")
+            raise ProviderTimeout(f"{stage} timed out after {timeout:.0f}s", source=source, stage=stage) from exc
+        except NotFound as exc:
+            # A title/episode that does not exist is not a provider fault.
+            exc.source, exc.stage = exc.source or source, exc.stage or stage
+            raise
+        except ProviderError as exc:
+            self.health.record(source, stage, False, int((time.monotonic() - started) * 1000), exc.message)
+            exc.source, exc.stage = exc.source or source, exc.stage or stage
+            raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - extractor internals vary wildly
+            self.health.record(source, stage, False, int((time.monotonic() - started) * 1000), _short_error(exc))
+            logger.warning("%s %s failed: %s", source, stage, _short_error(exc))
+            raise ProviderError(f"{stage} failed: {_short_error(exc)}", source=source, stage=stage) from exc
+        self.health.record(source, stage, True, int((time.monotonic() - started) * 1000))
+        return result
+
+    # ----------------------------------------------------------------- search
+    async def search(self, query: str, sources: list[str] | None = None) -> SearchResponse:
+        query = query.strip()
+        sources = [s for s in (sources or self.enabled_sources) if s in SOURCE_BY_ID]
+        if not sources:
+            raise ProviderUnavailable("No enabled sources")
+        statuses: list[ProviderSearchStatus] = []
+
+        async def run(source: str) -> list[SearchResult]:
+            started = time.monotonic()
+            label = SOURCE_BY_ID[source].label
+            try:
+                found = await self._search_one(source, query)
+            except ProviderError as exc:
+                statuses.append(
+                    ProviderSearchStatus(
+                        source=source,
+                        label=label,
+                        ok=False,
+                        latency_ms=int((time.monotonic() - started) * 1000),
+                        error=exc.message,
+                        timed_out=isinstance(exc, ProviderTimeout),
+                    )
                 )
-                for source in sources
-            ],
-            return_exceptions=True,
-        )
+                return []
+            statuses.append(
+                ProviderSearchStatus(
+                    source=source,
+                    label=label,
+                    ok=True,
+                    count=len(found),
+                    latency_ms=int((time.monotonic() - started) * 1000),
+                )
+            )
+            return found
+
+        batches = await asyncio.gather(*(run(source) for source in sources))
         results: list[SearchResult] = []
         seen: set[str] = set()
-        for source, batch in zip(sources, batches, strict=True):
-            if isinstance(batch, TimeoutError):
-                logger.warning(
-                    "Search timed out for %s after %.1fs",
-                    source,
-                    self.settings.provider_search_timeout,
-                )
-                continue
-            if isinstance(batch, Exception):
-                logger.warning("Search failed for %s: %s", source, batch)
-                continue
+        for batch in batches:
             for item in batch:
-                key = f"{item.source}:{item.title.lower()}"
-                if key in seen:
+                if item.id in seen:
                     continue
-                seen.add(key)
+                seen.add(item.id)
                 results.append(item)
-        return results
+        order = {source: i for i, source in enumerate(sources)}
+        statuses.sort(key=lambda s: order.get(s.source, 99))
+        return SearchResponse(query=query, results=results, providers=statuses)
 
     async def _search_one(self, source: str, query: str) -> list[SearchResult]:
-        extractor, _module = load_extractor(source, self.settings)
-        found = await extractor.a_search(query)
+        provider = self.provider(source)
+
+        async def call() -> list[Any]:
+            return list(await provider.extractor().a_search(query))
+
+        found = await self._stage(source, "search", call(), self.settings.provider_search_timeout)
         out: list[SearchResult] = []
         for item in found:
-            key = _stable_key(source, item)
-            external_id = encode_external_id(source, key)
+            title = (getattr(item, "title", "") or "").strip()
+            if not title:
+                continue
+            external_id = encode_external_id(source, _stable_key(item))
             self.cache.put(
                 external_id,
                 CachedSearch(
                     source=source,
-                    url=item.url,
-                    title=item.title,
-                    thumbnail=item.thumbnail or "",
-                    payload=_payload_from_item(item),
+                    url=getattr(item, "url", "") or "",
+                    title=title,
+                    thumbnail=getattr(item, "thumbnail", "") or "",
+                    payload=_payload(item),
                     saved_at=time.time(),
                 ),
             )
+            self.remember_title(external_id, title)
             out.append(
                 SearchResult(
                     id=external_id,
-                    title=item.title,
-                    poster=item.thumbnail or None,
-                    description=None,
-                    year=None,
+                    title=title,
+                    poster=getattr(item, "thumbnail", None) or None,
                     source=source,
+                    source_label=provider.spec.label,
                 )
             )
         return out
 
-    def _build_search_obj(self, entry: CachedSearch) -> Any:
-        extractor, module = load_extractor(entry.source, self.settings)
-        kwargs = {"http": extractor.http, "http_async": extractor.http_async}
-        search_cls = module.Search
-        fields = getattr(search_cls, "__attrs_attrs__", None)
-        init_kwargs: dict[str, Any] = {
-            "title": entry.title,
-            "thumbnail": entry.thumbnail,
-            "url": entry.url,
-            **kwargs,
-        }
-        if fields:
-            names = {a.name for a in fields}
-            if "data" in names and entry.payload:
-                init_kwargs["data"] = entry.payload
-        return search_cls(**init_kwargs)
-
-    async def _resolve_search(self, external_id: str) -> Any:
-        entry = self.cache.get(external_id)
-        if entry is None:
-            source, key = decode_external_id(external_id)
-            # Best-effort rebuild for URL-based sources (AnimeGo etc.)
-            if key.startswith("title:"):
-                raise LookupError("Search cache expired; search again")
-            url = key if not key.startswith("id:") else "_"
-            entry = CachedSearch(
-                source=source,
-                url=url,
-                title=key.split("/")[-1].replace("-", " "),
-                thumbnail="",
-                payload={"id": int(key.split(":", 1)[1])} if key.startswith("id:") and key.split(":")[1].isdigit() else {},
-                saved_at=time.time(),
-            )
-            if entry.url == "_" and not entry.payload:
-                raise LookupError("Search cache expired; search again")
-        try:
-            return self._build_search_obj(entry)
-        except Exception as exc:
-            logger.warning("Rebuild search failed (%s), trying re-search: %s", external_id, exc)
-            extractor, _ = load_extractor(entry.source, self.settings)
-            hits = await extractor.a_search(entry.title)
-            for hit in hits:
-                if _stable_key(entry.source, hit) == decode_external_id(external_id)[1] or hit.url == entry.url:
-                    return hit
-            if hits:
-                return hits[0]
-            raise LookupError(f"Anime not found for id={external_id}") from exc
-
-    async def get_anime(self, external_id: str, include_voiceovers: bool = False) -> AnimeDetail:
-        search_obj = await self._resolve_search(external_id)
-        anime = await search_obj.a_get_anime()
-        episodes_raw = await anime.a_get_episodes()
-        episodes: list[EpisodeInfo] = []
-        for ep in episodes_raw:
-            voiceovers: list[VoiceoverOption] = []
-            if include_voiceovers:
-                try:
-                    sources_list = await ep.a_get_sources()
-                    voiceovers = [
-                        VoiceoverOption(
-                            title=src.title,
-                            url=src.url,
-                            player_host=_player_host(src.url),
-                            index=i,
-                        )
-                        for i, src in enumerate(sources_list)
-                    ]
-                except Exception as exc:
-                    logger.warning("Failed to load sources for ep %s: %s", ep.ordinal, exc)
-            episodes.append(
-                EpisodeInfo(
-                    title=ep.title,
-                    ordinal=int(ep.ordinal),
-                    season=1,
-                    voiceovers=voiceovers,
+    # ------------------------------------------------------------ resolution
+    async def _research(self, external_id: str, title: str) -> Any:
+        """Search again by title and accept only the exact same provider key (never a lookalike)."""
+        source, key = decode_external_id(external_id)
+        provider = self.provider(source)
+        hits = await asyncio.wait_for(provider.extractor().a_search(title), self.settings.provider_search_timeout)
+        for hit in hits:
+            if _stable_key(hit) == key:
+                self.cache.put(
+                    external_id,
+                    CachedSearch(source, getattr(hit, "url", "") or "", hit.title, hit.thumbnail or "", _payload(hit), time.time()),
                 )
-            )
+                return hit
+        raise CacheExpired("Title not found by provider any more; search again", source=source, stage="details")
 
+    async def _search_object(self, external_id: str) -> Any:
+        source, key = decode_external_id(external_id)
+        provider = self.provider(source)
+        entry = self.cache.get(external_id)
+        if entry is None and (key.startswith("/") or key.startswith("http")):
+            # URL keys (AnimeGO, Yummy) can be rebuilt without cached data.
+            slug = key.rstrip("/").split("/")[-1]
+            entry = CachedSearch(source, key, self._title_hints.get(external_id) or slug.replace("-", " "), "", {}, time.time())
+        if entry is not None:
+            try:
+                return provider.build_search(entry)
+            except CacheExpired:
+                pass
+            except ProviderUnavailable:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.info("Rebuilding search object for %s failed: %s", external_id, exc)
+        title = (entry.title if entry else None) or self._title_hints.get(external_id)
+        if not title:
+            raise CacheExpired("Search data expired; search for the title again", source=source, stage="details")
+        return await self._research(external_id, title)
+
+    async def _anime(self, external_id: str) -> Any:
+        cached = self._anime_cache.get(external_id)
+        if cached is not None:
+            return cached
         source, _ = decode_external_id(external_id)
+
+        async def load() -> Any:
+            search_obj = await self._search_object(external_id)
+            try:
+                return await search_obj.a_get_anime()
+            except Exception as first:  # noqa: BLE001 - stale payload -> one exact re-search
+                title = self._title_hints.get(external_id) or getattr(search_obj, "title", None)
+                if not title:
+                    raise first
+                hit = await self._research(external_id, title)
+                return await hit.a_get_anime()
+
+        anime = await self._stage(source, "details", load(), self.settings.provider_detail_timeout)
+        self._anime_cache.set(external_id, anime)
+        return anime
+
+    async def _episodes(self, external_id: str) -> list[Any]:
+        cached = self._episodes_cache.get(external_id)
+        if cached is not None:
+            return cached
+        source, _ = decode_external_id(external_id)
+        anime = await self._anime(external_id)
+
+        async def load() -> list[Any]:
+            return list(await anime.a_get_episodes())
+
+        episodes = await self._stage(source, "episodes", load(), self.settings.provider_detail_timeout)
+        self._episodes_cache.set(external_id, episodes)
+        return episodes
+
+    async def get_anime(self, external_id: str) -> AnimeDetail:
+        source, _ = decode_external_id(external_id)
+        spec = self.provider(source).spec
+        anime = await self._anime(external_id)
+        episodes_raw = await self._episodes(external_id)
+        episodes: list[EpisodeInfo] = []
+        seen: set[int] = set()
+        for ep in episodes_raw:
+            ordinal = _ordinal(getattr(ep, "ordinal", None))
+            if ordinal is None or ordinal in seen:
+                continue
+            seen.add(ordinal)
+            episodes.append(EpisodeInfo(title=(getattr(ep, "title", "") or f"Episode {ordinal}").strip(), ordinal=ordinal))
+        episodes.sort(key=lambda e: e.ordinal)
+        title = (getattr(anime, "title", "") or self._title_hints.get(external_id) or "Untitled").strip()
+        self.remember_title(external_id, title)
         return AnimeDetail(
             id=external_id,
-            title=anime.title,
-            poster=anime.thumbnail or None,
-            description=anime.description or None,
-            year=_guess_year(anime),
+            title=title,
+            poster=getattr(anime, "thumbnail", None) or None,
+            description=(getattr(anime, "description", "") or "").strip() or None,
+            year=_year(anime),
             source=source,
+            source_label=spec.label,
             seasons=[1],
             episodes=episodes,
         )
 
+    async def _episode(self, external_id: str, episode: int) -> Any:
+        for ep in await self._episodes(external_id):
+            if _ordinal(getattr(ep, "ordinal", None)) == episode:
+                return ep
+        source, _ = decode_external_id(external_id)
+        raise NotFound(f"Episode {episode} not found", source=source, stage="episodes")
+
+    async def _player_sources(self, external_id: str, episode: int, refresh: bool = False) -> list[players.PlayerSource]:
+        key = (external_id, episode)
+        if not refresh:
+            cached = self._sources_cache.get(key)
+            if cached is not None:
+                return cached
+        source, _ = decode_external_id(external_id)
+        ep = await self._episode(external_id, episode)
+
+        async def load() -> list[Any]:
+            return list(await ep.a_get_sources())
+
+        raw = await self._stage(source, "voiceovers", load(), self.settings.provider_detail_timeout)
+        result = [
+            players.PlayerSource(
+                voiceover=players.normalize_voiceover(getattr(src, "title", "")),
+                url=getattr(src, "url", "") or "",
+                label=players.player_label(getattr(src, "url", "") or ""),
+                raw=src,
+            )
+            for src in raw
+        ]
+        self._sources_cache.set(key, result)
+        return result
+
+    @staticmethod
+    def group_voiceovers(sources: list[players.PlayerSource]) -> "OrderedDict[str, VoiceoverGroup]":
+        groups: OrderedDict[str, VoiceoverGroup] = OrderedDict()
+        for src in sources:
+            key = players.voiceover_key(src.voiceover)
+            group = groups.setdefault(key, VoiceoverGroup(title=src.voiceover, players=[]))
+            group.players.append(src)
+        return groups
+
     async def get_episode_voiceovers(self, external_id: str, episode: int) -> list[VoiceoverOption]:
-        search_obj = await self._resolve_search(external_id)
-        anime = await search_obj.a_get_anime()
-        episodes = await anime.a_get_episodes()
-        ep = next((e for e in episodes if int(e.ordinal) == episode), None)
-        if ep is None:
-            raise LookupError(f"Episode {episode} not found")
-        sources_list = await ep.a_get_sources()
+        groups = self.group_voiceovers(await self._player_sources(external_id, episode))
         return [
             VoiceoverOption(
-                title=src.title,
-                url=src.url,
-                player_host=_player_host(src.url),
+                title=group.title,
+                kind=players.voiceover_kind(group.title),  # type: ignore[arg-type]
+                players=list(dict.fromkeys(p.label for p in group.players)),
                 index=i,
             )
-            for i, src in enumerate(sources_list)
+            for i, group in enumerate(groups.values())
         ]
 
-    def pick_voiceover(
-        self,
-        options: list[VoiceoverOption],
-        preferred: str | None = None,
-        preferred_list: list[str] | None = None,
-    ) -> VoiceoverOption:
-        if not options:
-            raise LookupError("No voiceovers available")
+    def _ordered_groups(self, groups: "OrderedDict[str, VoiceoverGroup]", preferred: str | None) -> list[VoiceoverGroup]:
+        all_groups = list(groups.values())
         if preferred:
-            for opt in options:
-                if preferred.lower() in opt.title.lower():
-                    return opt
-        prefs = preferred_list or self.settings.preferred_voiceover_list
-        for pref in prefs:
-            for opt in options:
-                if pref.lower() in opt.title.lower():
-                    return opt
-        return options[0]
+            wanted = players.voiceover_key(preferred)
+            exact = [g for k, g in groups.items() if k == wanted]
+            if exact:
+                return exact
+            partial = [g for k, g in groups.items() if wanted and (wanted in k or k in wanted)]
+            if partial:
+                return partial[:1]
+            return []
+        ranked: list[VoiceoverGroup] = []
+        for pref in self.settings.preferred_voiceover_list:
+            pref_key = players.voiceover_key(pref)
+            for key, group in groups.items():
+                if pref_key and pref_key in key and group not in ranked:
+                    ranked.append(group)
+        ranked.extend(g for g in all_groups if g not in ranked)
+        return ranked
 
     async def resolve_stream(
         self,
@@ -413,37 +518,139 @@ class ProviderRegistry:
         episode: int,
         voiceover: str | None = None,
         quality: int | None = None,
+        *,
+        player: str | None = None,
+        purpose: str = "play",
+        refresh: bool = False,
     ) -> ResolvedStream:
-        search_obj = await self._resolve_search(external_id)
-        anime_obj = await search_obj.a_get_anime()
-        episodes = await anime_obj.a_get_episodes()
-        ep = next((e for e in episodes if int(e.ordinal) == episode), None)
-        if ep is None:
-            raise LookupError(f"Episode {episode} not found")
-        sources_list = await ep.a_get_sources()
-        options = [
-            VoiceoverOption(title=s.title, url=s.url, player_host=_player_host(s.url), index=i)
-            for i, s in enumerate(sources_list)
-        ]
-        chosen = self.pick_voiceover(options, preferred=voiceover)
-        src_obj = sources_list[chosen.index]
-        videos = await src_obj.a_get_videos()
-        if not videos:
-            raise LookupError("No video streams found")
-        q = quality or self.settings.default_quality
-        best = _pick_video(videos, q)
-        return ResolvedStream(
-            anime_title=anime_obj.title,
-            episode=episode,
-            voiceover=chosen.title,
-            source_url=chosen.url,
-            video=VideoStream(
-                type=best.type,
-                quality=int(best.quality),
-                url=best.url,
-                headers=dict(best.headers or {}),
-            ),
+        source, _ = decode_external_id(external_id)
+        allowed = players.BROWSER_TYPES if purpose == "play" else players.DOWNLOAD_TYPES
+        wanted_quality = quality or self.settings.default_quality
+        anime = await self._anime(external_id)
+        attempts: list[dict] = []
+
+        for attempt in range(2):  # second pass refreshes stale player lists once
+            sources = await self._player_sources(external_id, episode, refresh=refresh or attempt > 0)
+            groups = self._ordered_groups(self.group_voiceovers(sources), voiceover)
+            if not groups:
+                raise NotFound(f"Voiceover '{voiceover}' is not available for episode {episode}", source=source, stage="voiceovers")
+            for group in groups[:MAX_AUTO_VOICEOVER_GROUPS]:
+                ranked = sorted(
+                    group.players,
+                    key=lambda p: (p.label != player if player else False, players.player_health.rank(p.label)),
+                )
+                for candidate in ranked:
+                    started = time.monotonic()
+                    try:
+                        videos = await asyncio.wait_for(
+                            players.extract_videos(candidate.raw, self.proxy), self.settings.provider_stream_timeout
+                        )
+                        chosen = players.pick_video(videos, wanted_quality, allowed)
+                        if chosen is None:
+                            kinds = sorted({getattr(v, "type", "?") for v in videos})
+                            raise LookupError(
+                                f"no {'browser-playable ' if purpose == 'play' else ''}streams (got {', '.join(kinds) or 'none'})"
+                            )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - try the next player
+                        players.player_health.failure(candidate.label)
+                        message = "timed out" if isinstance(exc, TimeoutError) else _short_error(exc)
+                        attempts.append({"voiceover": group.title, "player": candidate.label, "error": message})
+                        logger.info("%s ep%s %s/%s failed: %s", source, episode, group.title, candidate.label, message)
+                        continue
+                    players.player_health.success(candidate.label)
+                    self.health.record(source, "stream", True, int((time.monotonic() - started) * 1000))
+                    headers = {str(k): str(v) for k, v in (getattr(chosen, "headers", None) or {}).items()}
+                    if not any(k.lower() == "user-agent" for k in headers):
+                        headers["User-Agent"] = DEFAULT_USER_AGENT
+                    return ResolvedStream(
+                        anime_title=getattr(anime, "title", "") or "",
+                        episode=episode,
+                        voiceover=group.title,
+                        player=candidate.label,
+                        video=ResolvedVideo(type=chosen.type, quality=int(chosen.quality), url=chosen.url, headers=headers),
+                        qualities=players.available_qualities(videos, allowed),
+                        browser_playable=chosen.type in players.BROWSER_TYPES,
+                        source=source,
+                    )
+            if refresh:
+                break
+
+        summary = "; ".join(f"{a['voiceover']}/{a['player']}: {a['error']}" for a in attempts[-6:])
+        self.health.record(source, "stream", False, None, summary or "no players")
+        raise StreamUnavailable(
+            f"No working stream for episode {episode}" + (f" ({summary})" if summary else ""),
+            source=source,
+            stage="stream",
+            attempts=attempts,
         )
+
+    def pick_voiceover_title(self, options: list[VoiceoverOption], preferred: str | None = None) -> str | None:
+        if not options:
+            return None
+        groups = OrderedDict((players.voiceover_key(o.title), VoiceoverGroup(o.title, [])) for o in options)
+        ordered = self._ordered_groups(groups, preferred)
+        return ordered[0].title if ordered else None
+
+    # ------------------------------------------------------------ diagnostics
+    async def check(self, source: str) -> None:
+        """Run the full pipeline against a known title. Results land in ``self.health``."""
+        spec = SOURCE_BY_ID.get(source)
+        if spec is None:
+            raise ProviderUnavailable(f"Unknown source '{source}'", source=source)
+        from backend.providers.errors import STAGES
+
+        for stage in STAGES:  # stale results must not survive a new check
+            self.health.get(source).stages.pop(stage, None)
+        try:
+            found = await self._search_one(source, spec.check_query)
+            if not found:
+                # Search works but the reference title is missing from this catalog: inconclusive, not a failure.
+                latency = self.health.get(source).stages.get("search")
+                self.health.record(
+                    source,
+                    "search",
+                    True,
+                    latency.latency_ms if latency else None,
+                    f"проверочный тайтл «{spec.check_query}» не найден — остальные этапы не проверены",
+                )
+                return
+            external_id = found[0].id
+            self._anime_cache.pop(external_id)
+            self._episodes_cache.pop(external_id)
+            detail = await self.get_anime(external_id)
+            if not detail.episodes:
+                self.health.record(source, "voiceovers", False, None, "title has no episodes")
+                return
+            first = detail.episodes[0].ordinal
+            await self._player_sources(external_id, first, refresh=True)
+            stream = await self.resolve_stream(external_id, first, refresh=True)
+            await self._probe_media(source, stream)
+        except ProviderError:
+            pass  # already recorded per stage
+        finally:
+            self.health.mark_checked(source)
+
+    async def _probe_media(self, source: str, stream: ResolvedStream) -> None:
+        """Fetch the first bytes of the resolved stream through the shared media client."""
+        from backend.providers.http import media_clients
+
+        client = media_clients.get(self.proxy)
+        started = time.monotonic()
+        try:
+            response = await client.get(
+                stream.video.url,
+                headers={**stream.video.headers, "Range": "bytes=0-2047"},
+                follow_redirects=True,
+                timeout=15,
+            )
+            if response.status_code >= 400:
+                raise ProviderError(f"media host answered HTTP {response.status_code} ({urlsplit(stream.video.url).netloc})")
+        except ProviderError as exc:
+            self.health.record(source, "stream", False, int((time.monotonic() - started) * 1000), exc.message)
+        except Exception as exc:  # noqa: BLE001
+            self.health.record(source, "stream", False, int((time.monotonic() - started) * 1000), _short_error(exc))
 
 
 _registry: ProviderRegistry | None = None

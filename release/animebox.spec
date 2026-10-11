@@ -9,6 +9,10 @@ hiddenimports = sorted(set(
     + collect_submodules("anicli_api.source", on_error="raise")
     + collect_submodules("anicli_api.player", on_error="raise")
     + ["aiosqlite", "sqlalchemy.dialects.sqlite.aiosqlite"]
+    # httpx imports these lazily (HTTP/2 transport, SOCKS proxies); PyInstaller cannot see them.
+    + collect_submodules("h2") + collect_submodules("hpack") + collect_submodules("hyperframe")
+    + ["socksio", "brotli"]
+    + collect_submodules("backend")
 ))
 
 datas = anicli_datas + [

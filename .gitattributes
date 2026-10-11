@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Patches are applied with git apply against LF checkouts; keep them LF on every OS.
+*.patch text eol=lf
+*.sh text eol=lf

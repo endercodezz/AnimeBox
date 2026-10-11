@@ -8,7 +8,7 @@ SKIP_BUILD=0
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "$1 not found. $2" >&2; exit 1; }; }
 need python3 "Install Python 3.12+."
-need npm "Install Node.js 20+ and npm."
+need npm "Install Node.js 24+ and npm."
 need git "Install Git."
 python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,12) else 1)' || { echo "Python 3.12+ required: $(python3 --version)" >&2; exit 1; }
 
@@ -17,15 +17,8 @@ echo "Root: $ROOT"
 echo "Python: $(python3 --version)"
 echo "Node:   $(node --version)"
 
-ANICLI="$ROOT/.references/anicli-api"
-if [[ ! -f "$ANICLI/pyproject.toml" ]]; then
-  echo "==> Cloning anicli-api (MIT)"
-  mkdir -p "$ROOT/.references"
-  git clone --depth 1 https://github.com/vypivshiy/anicli-api "$ANICLI" || { echo "Failed to clone anicli-api. Check internet and retry." >&2; exit 1; }
-else
-  echo "==> anicli-api checkout: OK"
-fi
-python3 "$ROOT/scripts/patch_anicli.py"
+echo "==> anicli-api (MIT), pinned commit from patches/anicli-api.ref"
+python3 "$ROOT/scripts/patch_anicli.py" --checkout || { echo "Failed to prepare anicli-api. Check internet and retry." >&2; exit 1; }
 
 PYTHON="$ROOT/.venv/bin/python"
 if [[ ! -x "$PYTHON" ]] || ! "$PYTHON" -c 'import sys' >/dev/null 2>&1; then

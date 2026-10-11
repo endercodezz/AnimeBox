@@ -25,7 +25,7 @@ function New-DefaultEnv {
 Write-Host "==> AnimeBox setup" -ForegroundColor Magenta
 Write-Host "Root: $Root"
 Require-Command python "Install Python 3.12+ from https://python.org and enable Add Python to PATH."
-Require-Command npm "Install Node.js 20+ from https://nodejs.org."
+Require-Command npm "Install Node.js 24+ from https://nodejs.org."
 Require-Command git "Install Git from https://git-scm.com."
 
 $pyOk = & python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)"
@@ -33,17 +33,9 @@ if ($LASTEXITCODE -ne 0) { throw "Python 3.12+ required. Found: $(& python --ver
 Write-Host "Python: $(& python --version 2>&1)"
 Write-Host "Node:   $(& node --version 2>&1)"
 
-$Anicli = Join-Path $Root ".references\anicli-api"
-if (-not (Test-Path "$Anicli\pyproject.toml")) {
-  Write-Host "==> Cloning anicli-api (MIT)"
-  New-Item -ItemType Directory -Force (Split-Path $Anicli) | Out-Null
-  & git clone --depth 1 https://github.com/vypivshiy/anicli-api $Anicli
-  if ($LASTEXITCODE -ne 0) { throw "Failed to clone anicli-api. Check internet access and retry." }
-} else {
-  Write-Host "==> anicli-api checkout: OK"
-}
-& python "$Root\scripts\patch_anicli.py"
-if ($LASTEXITCODE -ne 0) { throw "Failed to apply AnimeBox compatibility patch to anicli-api." }
+Write-Host "==> anicli-api (MIT), pinned commit from patches\anicli-api.ref"
+& python "$Root\scripts\patch_anicli.py" --checkout
+if ($LASTEXITCODE -ne 0) { throw "Failed to prepare anicli-api (clone or compatibility patch). Check internet access and retry." }
 
 $python = Join-Path $Root ".venv\Scripts\python.exe"
 $venvValid = (Test-Path $python)
