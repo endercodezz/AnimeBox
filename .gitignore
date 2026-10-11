@@ -71,6 +71,9 @@ desktop.ini
 *.swp
 *.swo
 
-# Claude local state
+# Local AI-agent workspace and temporary development files
+.tmp/
 .claude/
+.codex/
+.cursor/
 claude.md
