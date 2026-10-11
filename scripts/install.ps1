@@ -25,7 +25,7 @@ function New-DefaultEnv {
 Write-Host "==> AnimeBox setup" -ForegroundColor Magenta
 Write-Host "Root: $Root"
 Require-Command python "Install Python 3.12+ from https://python.org and enable Add Python to PATH."
-Require-Command npm "Install Node.js 20+ from https://nodejs.org."
+Require-Command npm "Install Node.js 24+ from https://nodejs.org."
 Require-Command git "Install Git from https://git-scm.com."
 
 $pyOk = & python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)"

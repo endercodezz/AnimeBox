@@ -17,7 +17,7 @@ function Check([string]$Label, [scriptblock]$Test, [string]$Fix) {
 }
 Write-Host "AnimeBox diagnostics" -ForegroundColor Magenta
 Check "Python 3.12+" { python -c "import sys; assert sys.version_info >= (3,12); print(sys.version.split()[0])" } "Install Python 3.12+."
-Check "Node/npm" { "$(node --version) / npm $(npm --version)" } "Install Node.js 20+."
+Check "Node/npm" { "$(node --version) / npm $(npm --version)" } "Install Node.js 24+."
 Check "Git" { git --version } "Install Git."
 Check "anicli-api" { if (-not (Test-Path ".references\anicli-api\pyproject.toml")) { throw "missing" }; "present" } "Run scripts\install.ps1 with internet."
 Check "Python environment" { .\.venv\Scripts\python.exe -c "import backend.main; print('imports OK')" } "Run scripts\install.ps1."

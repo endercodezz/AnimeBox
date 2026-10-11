@@ -8,7 +8,7 @@ SKIP_BUILD=0
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "$1 not found. $2" >&2; exit 1; }; }
 need python3 "Install Python 3.12+."
-need npm "Install Node.js 20+ and npm."
+need npm "Install Node.js 24+ and npm."
 need git "Install Git."
 python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,12) else 1)' || { echo "Python 3.12+ required: $(python3 --version)" >&2; exit 1; }
 

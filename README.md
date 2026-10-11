@@ -81,7 +81,7 @@ episodes that AnimeBox downloaded earlier but no longer tracks.
 
 ## Run from source
 
-Requires Python 3.12+, Node.js 20+, Git, and FFmpeg in `PATH`. Docker is not used. The install script fetches a pinned,
+Requires Python 3.12+, Node.js 24+, Git, and FFmpeg in `PATH`. Docker is not used. The install script fetches a pinned,
 tested commit of [anicli-api](https://github.com/vypivshiy/anicli-api) into `.references/anicli-api` and applies the
 compatibility patch from `patches/`.
 

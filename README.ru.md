@@ -81,7 +81,7 @@ AnimeBox запускает приватный сервер на `http://127.0.0
 
 ## Запуск из исходников
 
-Нужны Python 3.12+, Node.js 20+, Git и FFmpeg в `PATH`. Docker не используется. Скрипт установки скачивает
+Нужны Python 3.12+, Node.js 24+, Git и FFmpeg в `PATH`. Docker не используется. Скрипт установки скачивает
 закреплённый проверенный коммит [anicli-api](https://github.com/vypivshiy/anicli-api) в `.references/anicli-api` и
 применяет патч совместимости из `patches/`.
 

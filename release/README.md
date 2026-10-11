@@ -1,6 +1,6 @@
 # AnimeBox portable builds
 
-Builds are native per operating system. On Windows, Linux or macOS with Python 3.12 and Node 20+:
+Builds are native per operating system. On Windows, Linux or macOS with Python 3.12 and Node 24+:
 
 ```bash
 python scripts/patch_anicli.py --checkout
