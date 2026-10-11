@@ -137,9 +137,8 @@ jobs:
       - name: Verify archive contents and checksum
         shell: bash
         run: |
-          archive=$(ls release/artifacts/"$TARGET_NAME".zip release/artifacts/"$TARGET_NAME".tar.gz 2>/dev/null)
-          test -n "$archive"
-          python release/verify_archive.py "$archive" --version "$VERSION"
+          if [[ "${{ runner.os }}" == "Linux" ]]; then ext=tar.gz; else ext=zip; fi
+          python release/verify_archive.py "release/artifacts/$TARGET_NAME.$ext" --version "$VERSION"
 
       - name: Verify packaged ffmpeg
         shell: bash
